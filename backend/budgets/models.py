@@ -2,8 +2,46 @@ from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from decimal import Decimal
+from calendar import monthrange
+from datetime import timedelta
+from django.utils import timezone
 
 from expenses.categories import BUDGET_CATEGORY_CHOICES
+
+
+def derive_budget_date_range(period, start_date=None):
+    """Return a deterministic inclusive range for a budget period."""
+    if start_date is None:
+        today = timezone.localdate()
+        if period == 'DAILY':
+            start_date = today
+        elif period == 'WEEKLY':
+            start_date = today - timedelta(days=today.weekday())
+        elif period == 'YEARLY':
+            start_date = today.replace(month=1, day=1)
+        else:
+            start_date = today.replace(day=1)
+
+    if period == 'DAILY':
+        end_date = start_date
+    elif period == 'WEEKLY':
+        end_date = start_date + timedelta(days=6)
+    elif period == 'YEARLY':
+        try:
+            next_period = start_date.replace(year=start_date.year + 1)
+        except ValueError:
+            next_period = start_date.replace(year=start_date.year + 1, day=28)
+        end_date = next_period - timedelta(days=1)
+    else:
+        next_month = 1 if start_date.month == 12 else start_date.month + 1
+        next_year = start_date.year + 1 if start_date.month == 12 else start_date.year
+        next_day = min(start_date.day, monthrange(next_year, next_month)[1])
+        end_date = start_date.replace(
+            year=next_year,
+            month=next_month,
+            day=next_day,
+        ) - timedelta(days=1)
+    return start_date, end_date
 
 
 class Budget(models.Model):
@@ -58,6 +96,15 @@ class Budget(models.Model):
     
     def __str__(self):
         return f"{self.name} - रू {self.amount} ({self.period})"
+
+
+    def save(self, *args, **kwargs):
+        if not self.start_date:
+            self.start_date, derived_end = derive_budget_date_range(self.period)
+            self.end_date = self.end_date or derived_end
+        elif not self.end_date:
+            _, self.end_date = derive_budget_date_range(self.period, self.start_date)
+        super().save(*args, **kwargs)
 
 
 class BudgetAlert(models.Model):

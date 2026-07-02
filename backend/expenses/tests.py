@@ -8,6 +8,7 @@ from unittest.mock import patch
 from .models import Expense
 from organizations.models import Organization, OrganizationMember
 from receipts.models import Receipt
+from budgets.models import Budget, BudgetAlert
 
 User = get_user_model()
 
@@ -106,16 +107,18 @@ class ExpenseDashboardMetricsTestCase(TestCase):
 
     
     def test_create_expense(self):
+        manual_date = date.today() - timedelta(days=14)
         data = {
             'title': 'New Test Expense',
             'amount': '500.00',
             'category': 'FOOD',
-            'date': date.today().isoformat(),
+            'date': manual_date.isoformat(),
             'description': 'Test description'
         }
         response = self.client.post('/api/expenses/', data)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.json()['title'], 'New Test Expense')
+        self.assertEqual(response.json()['date'], manual_date.isoformat())
     
     def test_create_expense_validation(self):
         # Test with invalid amount
@@ -212,6 +215,71 @@ class ExpenseDashboardMetricsScopeTestCase(TestCase):
 
         self.assertEqual(response.data['month']['total'], 100.0)
         self.assertEqual(response.data['month']['count'], 1)
+        today_point = response.data['daily_trend'][-1]
+        self.assertEqual(today_point['date'], date.today())
+        self.assertEqual(today_point['amount'], 100.0)
+
+    def test_month_comparison_uses_previous_approved_expenses(self):
+        month_start = date.today().replace(day=1)
+        previous_month_date = month_start - timedelta(days=1)
+        self.create_expense(user=self.staff, amount='150.00')
+        self.create_expense(
+            user=self.staff,
+            amount='100.00',
+            expense_date=previous_month_date,
+            title='Previous month approved',
+        )
+        self.create_expense(
+            user=self.staff,
+            amount='400.00',
+            status_value='PENDING',
+            expense_date=previous_month_date,
+            title='Previous month pending',
+        )
+
+        response = self.get_metrics(self.owner)
+
+        self.assertEqual(response.data['month']['previous_total'], 100.0)
+        self.assertEqual(response.data['month']['growth'], 50.0)
+
+    def test_dashboard_trend_isolated_to_active_workspace(self):
+        other_owner = User.objects.create_user(
+            username='otherdashboardowner',
+            email='other-dashboard-owner@example.com',
+            password='testpass123',
+        )
+        other_organization = Organization.objects.create(name='Other Dashboard Org')
+        OrganizationMember.objects.create(
+            organization=other_organization,
+            user=other_owner,
+            role='OWNER',
+        )
+        Expense.objects.create(
+            organization=other_organization,
+            user=other_owner,
+            title='Other workspace expense',
+            amount=Decimal('900.00'),
+            category='OTHER',
+            date=date.today(),
+            status='APPROVED',
+        )
+        self.create_expense(user=self.staff, amount='75.00')
+
+        response = self.get_metrics(self.owner)
+
+        self.assertEqual(response.data['month']['total'], 75.0)
+        self.assertEqual(response.data['daily_trend'][-1]['amount'], 75.0)
+
+    def test_dashboard_trend_empty_data_is_safe(self):
+        response = self.get_metrics(self.owner)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['month']['total'], 0.0)
+        self.assertEqual(response.data['month']['count'], 0)
+        self.assertEqual(response.data['month']['previous_total'], 0.0)
+        self.assertIsNone(response.data['month']['growth'])
+        self.assertTrue(response.data['daily_trend'])
+        self.assertTrue(all(point['amount'] == 0 for point in response.data['daily_trend']))
 
     def test_staff_metrics_include_only_their_own_approved_expenses(self):
         self.create_expense(user=self.staff, amount='75.00')
@@ -539,6 +607,34 @@ class ExpenseApprovalDecisionTestCase(TestCase):
         self.assertIsNotNone(expense.reviewed_at)
         self.assertEqual(expense.rejection_reason, '')
         notify.assert_called_once()
+
+    @patch('budgets.views.send_budget_alert_email')
+    @patch('expenses.views.notify_expense_approved')
+    def test_approved_expense_triggers_category_and_all_budget_alerts(self, notify, send_email):
+        expense = self.create_expense(amount='50.00')
+        for name, category in [('Other Budget', 'OTHER'), ('Overall Budget', 'ALL')]:
+            Budget.objects.create(
+                organization=self.organization,
+                name=name,
+                amount=Decimal('50.00'),
+                period='DAILY',
+                category=category,
+                alert_threshold=80,
+                start_date=date.today(),
+                end_date=date.today(),
+                created_by=self.owner,
+            )
+        self.authenticate(self.owner)
+
+        response = self.client.post(
+            f'/api/expenses/{expense.id}/approve/',
+            HTTP_X_ORGANIZATION_ID=str(self.organization.id),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        alerted_categories = set(BudgetAlert.objects.values_list('budget__category', flat=True))
+        self.assertEqual(alerted_categories, {'OTHER', 'ALL'})
+        self.assertEqual(BudgetAlert.objects.filter(alert_type='EXCEEDED').count(), 2)
 
     @patch('expenses.views.notify_expense_rejected')
     def test_owner_can_reject_another_users_pending_expense(self, notify):

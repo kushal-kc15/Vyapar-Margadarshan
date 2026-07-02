@@ -1,18 +1,22 @@
 import io
 import shutil
 import tempfile
+from datetime import date
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from kombu.exceptions import OperationalError
 from PIL import Image
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from organizations.models import Organization, OrganizationMember
+from expenses.models import Expense
 from receipts.models import Receipt
+from notifications.models import Notification
 from receipts.services.ai_receipt_extractor import (
     AIReceiptExtractionError,
     GeminiReceiptExtractor,
@@ -21,6 +25,123 @@ from receipts.services.ai_receipt_extractor import (
 User = get_user_model()
 
 TEST_MEDIA_ROOT = tempfile.mkdtemp()
+
+
+@override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT)
+class ReceiptExpenseDateTestCase(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username="receiptdateowner",
+            email="receipt-date@example.com",
+            password="StrongPass123!",
+            email_verified=True,
+        )
+        self.organization = Organization.objects.create(name="Receipt Date Org")
+        OrganizationMember.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role="OWNER",
+        )
+        self.user.active_organization = self.organization
+        self.user.save(update_fields=["active_organization"])
+        self.client.force_authenticate(self.user)
+
+    def create_verified_receipt(self, receipt_date):
+        return Receipt.objects.create(
+            organization=self.organization,
+            user=self.user,
+            image=receipt_image("verified-receipt.png"),
+            vendor_name="Old Receipt Store",
+            total_amount="125.00",
+            receipt_date=receipt_date,
+            category="OFFICE",
+            description="Verified OCR receipt",
+            status="VERIFIED",
+        )
+
+    def test_ocr_expense_without_explicit_date_uses_today(self):
+        receipt = self.create_verified_receipt(date(2020, 1, 15))
+
+        response = self.client.post(f"/api/receipts/{receipt.id}/create_expense/", {})
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        expense = Expense.objects.get(id=response.data["expense_id"])
+        self.assertEqual(expense.date, timezone.localdate())
+
+    def test_ocr_expense_does_not_default_to_old_detected_receipt_date(self):
+        old_receipt_date = date(2018, 7, 4)
+        receipt = self.create_verified_receipt(old_receipt_date)
+
+        response = self.client.post(f"/api/receipts/{receipt.id}/create_expense/", {})
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        expense = Expense.objects.get(id=response.data["expense_id"])
+        self.assertNotEqual(expense.date, old_receipt_date)
+        receipt.refresh_from_db()
+        self.assertEqual(receipt.receipt_date, old_receipt_date)
+
+    @patch('expenses.views.ExpenseViewSet.check_budgets_for_expense')
+    def test_owner_receipt_expense_triggers_budget_check(self, check_budgets):
+        receipt = self.create_verified_receipt(date.today())
+
+        response = self.client.post(f'/api/receipts/{receipt.id}/create_expense/', {})
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        expense = Expense.objects.get(id=response.data['expense_id'])
+        self.assertEqual(expense.status, 'APPROVED')
+        check_budgets.assert_called_once_with(expense)
+
+    @patch('analytics.views.detect_expense_anomalies')
+    @patch('receipts.views.notify_pending_approval')
+    def test_staff_receipt_expense_notifies_owner(self, notify_pending, detect_anomaly):
+        detect_anomaly.return_value = {
+            'expense_id': 1,
+            'score': 65,
+            'severity': 'MEDIUM',
+            'reasons': [{'code': 'HIGH_CATEGORY_AMOUNT', 'message': 'Higher than usual.'}],
+        }
+        staff = User.objects.create_user(
+            username='receiptstaff',
+            email='receipt-staff@example.com',
+            password='StrongPass123!',
+            email_verified=True,
+        )
+        OrganizationMember.objects.create(
+            user=staff,
+            organization=self.organization,
+            role='STAFF',
+        )
+        staff.active_organization = self.organization
+        staff.save(update_fields=['active_organization'])
+        receipt = Receipt.objects.create(
+            organization=self.organization,
+            user=staff,
+            image=receipt_image('staff-receipt.png'),
+            vendor_name='Staff Store',
+            total_amount='75.00',
+            receipt_date=date.today(),
+            category='OFFICE',
+            status='VERIFIED',
+        )
+        self.client.force_authenticate(staff)
+
+        response = self.client.post(f'/api/receipts/{receipt.id}/create_expense/', {})
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        expense = Expense.objects.get(id=response.data['expense_id'])
+        self.assertEqual(expense.status, 'PENDING')
+        notify_pending.assert_called_once()
+        owners, notified_expense = notify_pending.call_args.args
+        self.assertEqual(notified_expense, expense)
+        self.assertEqual(list(owners.values_list('user_id', flat=True)), [self.user.id])
+        unusual = Notification.objects.get(
+            user=self.user,
+            notification_type='UNUSUAL_EXPENSE',
+            related_object_id=expense.id,
+        )
+        self.assertEqual(unusual.metadata['anomaly_score'], 65)
+        self.assertEqual(unusual.metadata['severity'], 'MEDIUM')
 
 
 def receipt_image(name="receipt.png", content_type="image/png"):

@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, ChevronRight, TrendingUp, TrendingDown } from "lucide-react";
+import { Plus, ChevronRight } from "lucide-react";
 import api from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Panel } from "../components/Panel.jsx";
@@ -49,12 +49,6 @@ const currentDateString = () =>
     month: "long",
     year: "numeric",
   });
-
-const lastMonthName = () => {
-  const d = new Date();
-  d.setDate(0);
-  return d.toLocaleDateString(undefined, { month: "long" });
-};
 
 const greeting = () => {
   const h = new Date().getHours();
@@ -323,12 +317,19 @@ export default function Dashboard() {
     };
   }, []);
 
-  const weekSeries = useMemo(() => {
-    const points = summary?.last_7_days ?? summary?.metrics?.last_7_days ?? [];
-    if (!Array.isArray(points) || points.length === 0) return [];
+  const monthSeries = useMemo(() => {
+    const points = summary?.daily_trend ?? [];
+    if (
+      !Array.isArray(points) ||
+      points.length === 0 ||
+      Number(summary?.month?.count ?? 0) === 0
+    ) {
+      return [];
+    }
     return points.map((point) => ({
       label: new Date(point.date).toLocaleDateString(undefined, {
-        weekday: "short",
+        month: "short",
+        day: "numeric",
       }),
       value: Number(point.amount) || 0,
     }));
@@ -337,11 +338,32 @@ export default function Dashboard() {
   const todaySpend = summary?.today?.total ?? 0;
   const weekSpend = summary?.week?.total ?? 0;
   const monthSpend = summary?.month?.total ?? 0;
+  const previousMonthSpend = summary?.month?.previous_total ?? 0;
   const pendingAmount = pending.reduce(
     (s, e) => s + (Number(e.amount) || 0),
     0,
   );
   const monthDelta = summary?.month?.growth ?? null;
+  const spendingDays = useMemo(
+    () => monthSeries.filter((point) => point.value > 0),
+    [monthSeries],
+  );
+  const highestSpendingDay = useMemo(
+    () =>
+      spendingDays.reduce(
+        (highest, point) =>
+          !highest || point.value > highest.value ? point : highest,
+        null,
+      ),
+    [spendingDays],
+  );
+  const comparisonLabel = useMemo(() => {
+    if (previousMonthSpend <= 0 || monthDelta == null) return null;
+    if (monthDelta <= -90) return "Significantly lower than last month";
+    if (monthDelta >= 200) return "Significantly higher than last month";
+    if (Math.abs(monthDelta) < 1) return "About same as last month";
+    return `${monthDelta > 0 ? "Up" : "Down"} ${Math.abs(monthDelta)}% vs last month`;
+  }, [monthDelta, previousMonthSpend]);
 
   const topCategories = useMemo(() => {
     const byCat = new Map();
@@ -401,8 +423,8 @@ export default function Dashboard() {
 
       {/* HERO — Month-to-date spend */}
       <Reveal delay={80}>
-        <Panel variant="default" className="p-4 sm:p-4 lg:p-5 mb-2 border-t-2 border-t-rule-strong">
-          <div className="flex items-start sm:items-baseline justify-between mb-3 flex-col sm:flex-row gap-2">
+        <Panel variant="default" className="mb-2 border-t-2 border-t-rule-strong p-4 lg:p-5">
+          <div className="mb-3 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-baseline">
             <div>
               <p className="text-micro uppercase tracking-eyebrow text-ink-muted">
                 Month-to-date spend
@@ -420,38 +442,59 @@ export default function Dashboard() {
               </Link>
             )}
           </div>
-          <div className="flex items-start sm:items-end gap-3 sm:gap-4 mb-4 flex-col sm:flex-row">
-            <div className="max-w-full text-[2.1rem] min-[380px]:text-[2.4rem] sm:text-[3rem] lg:text-[3.25rem] font-semibold tracking-tight num text-ink leading-[1] tabular-nums break-words">
-              {formatCurrency(animatedMonth, currency)}
-            </div>
-            {monthDelta != null && (
-              <div className="flex sm:flex-col items-center sm:items-start gap-2 sm:gap-0 sm:pb-2">
-                <span
-                  className={cn(
-                    "text-base font-medium num inline-flex items-center gap-0.5",
-                    monthDelta <= 0 ? "text-moss-700" : "text-cinnabar-700",
-                  )}
-                >
-                  {monthDelta <= 0 ? (
-                    <TrendingDown size={15} />
-                  ) : (
-                    <TrendingUp size={15} />
-                  )}
-                  {Math.abs(monthDelta)}%
-                </span>
-                <span className="text-[11px] text-ink-muted">
-                  vs {lastMonthName()}
-                </span>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.38fr)] lg:gap-5">
+            <div className="min-w-0">
+              <div className="max-w-full break-words text-[2.1rem] font-semibold leading-none tracking-tight text-ink tabular-nums min-[380px]:text-[2.4rem] sm:text-[2.75rem]">
+                {formatCurrency(animatedMonth, currency)}
               </div>
-            )}
+              <p className="mt-1.5 text-xs font-medium text-ink-muted">
+                {comparisonLabel ??
+                  (monthSpend > 0
+                    ? "No approved spend last month for comparison"
+                    : "Current month")}
+              </p>
+
+              {spendingDays.length >= 2 ? (
+                <div className="mt-3 border-t border-rule pt-3">
+                  <AreaChart data={monthSeries} height={76} currency={currency} />
+                </div>
+              ) : spendingDays.length === 1 ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-rule pt-3 text-xs text-ink-muted">
+                  <span>One approved spending day recorded this month.</span>
+                  <span className="rounded-pill bg-paper-deep px-2 py-1 font-medium text-ink">
+                    {spendingDays[0].label} · {formatCurrency(spendingDays[0].value, currency)}
+                  </span>
+                </div>
+              ) : (
+                <p className="mt-3 border-t border-rule pt-3 text-xs text-ink-muted">
+                  No approved expenses recorded this month yet.
+                </p>
+              )}
+            </div>
+
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-rule pt-3 lg:grid-cols-1 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+              <div>
+                <dt className="text-[11px] text-ink-muted">Previous month</dt>
+                <dd className="mt-0.5 text-sm font-medium text-ink tabular-nums">
+                  {formatCurrency(previousMonthSpend, currency)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[11px] text-ink-muted">Spending days this month</dt>
+                <dd className="mt-0.5 text-sm font-medium text-ink tabular-nums">
+                  {spendingDays.length}
+                </dd>
+              </div>
+              <div className="col-span-2 lg:col-span-1">
+                <dt className="text-[11px] text-ink-muted">Highest spending day</dt>
+                <dd className="mt-0.5 text-sm font-medium text-ink">
+                  {highestSpendingDay
+                    ? `${highestSpendingDay.label} · ${formatCurrency(highestSpendingDay.value, currency)}`
+                    : "—"}
+                </dd>
+              </div>
+            </dl>
           </div>
-          {weekSeries.length > 0 ? (
-            <AreaChart data={weekSeries} height={112} currency={currency} />
-          ) : (
-            <p className="border-t border-rule pt-3 text-xs text-ink-muted">
-              Trend will appear after spending history is available.
-            </p>
-          )}
         </Panel>
       </Reveal>
 

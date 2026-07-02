@@ -13,6 +13,7 @@ class Notification(models.Model):
         ('EXPENSE_PENDING', 'Expense Pending Approval'),
         ('BUDGET_ALERT', 'Budget Alert'),
         ('BUDGET_EXCEEDED', 'Budget Exceeded'),
+        ('UNUSUAL_EXPENSE', 'Unusual Expense Submitted'),
         ('INVITATION_RECEIVED', 'Invitation Received'),
         ('MEMBER_JOINED', 'New Member Joined'),
         ('ROLE_CHANGED', 'Role Changed'),
@@ -47,6 +48,7 @@ class Notification(models.Model):
     related_object_type = models.CharField(max_length=50, blank=True, null=True)
     related_object_id = models.IntegerField(blank=True, null=True)
     action_url = models.CharField(max_length=500, blank=True, null=True)
+    metadata = models.JSONField(default=dict, blank=True)
     
     is_read = models.BooleanField(default=False)
     read_at = models.DateTimeField(null=True, blank=True)

@@ -217,7 +217,7 @@ export default function Team() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-3 sm:px-6 sm:py-4 lg:px-10">
+    <div className="mx-auto w-full max-w-7xl px-4 pb-6 pt-2 sm:px-6 lg:px-8">
       <div className="mb-2 flex flex-wrap items-center justify-end gap-1.5 border-b border-rule pb-2" aria-label="Team actions">
         {pageActions}
       </div>
@@ -235,9 +235,8 @@ export default function Team() {
         </div>
       )}
 
-      <section className="mt-2 border-t border-rule pt-3" aria-label="Team summary">
-        <p className="text-sm font-medium text-ink">Summary</p>
-        <div className="mt-2.5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="mt-2" aria-label="Team summary">
+        <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
           <SummaryMetric label="Members" value={summary.memberCount} />
           <SummaryMetric label="Owners" value={summary.ownerCount} />
           <SummaryMetric label="Staff" value={summary.staffCount} />
@@ -250,7 +249,7 @@ export default function Team() {
         </div>
       </section>
 
-      <section className="mt-3 border-y border-rule py-2.5" aria-label="Team search">
+      <section className="mt-3 rounded-md border border-rule bg-paper-deep/50 px-3 py-2.5" aria-label="Team search">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
           <div className="md:col-span-6">
             <label className="field-label" htmlFor="team-search">Search team</label>
@@ -262,7 +261,7 @@ export default function Team() {
                 value={q}
                 onChange={(event) => setQ(event.target.value)}
                 placeholder="Search members and invitations"
-                className="w-full h-10 pl-9 pr-3 bg-paper-deep border border-rule rounded-sm text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:bg-paper focus:border-cinnabar-500 focus:ring-2 focus:ring-cinnabar-500/15 transition-colors"
+                className="h-10 w-full rounded-sm border border-rule bg-paper pl-9 pr-3 text-sm text-ink placeholder:text-ink-muted transition-colors focus:border-moss-500 focus:outline-none focus:ring-2 focus:ring-moss-500/15 md:h-9"
               />
             </div>
           </div>
@@ -293,8 +292,8 @@ export default function Team() {
         />
       ) : (
         <>
-          <Panel className="mt-3">
-            <PanelHeader>
+          <Panel className="mt-3 overflow-hidden">
+            <PanelHeader className="!py-3">
               <PanelTitle>Members</PanelTitle>
               <p className="text-xs text-ink-muted mt-0.5">{filteredMembers.length} of {members.length} shown</p>
             </PanelHeader>
@@ -339,8 +338,8 @@ export default function Team() {
           </Panel>
 
           {isOwner && (
-            <Panel className="mt-4">
-              <PanelHeader>
+            <Panel className="mt-4 overflow-hidden">
+              <PanelHeader className="!py-3">
                 <PanelTitle>Pending invitations</PanelTitle>
                 <p className="text-xs text-ink-muted mt-0.5">{filteredInvites.length} of {invites.length} shown</p>
               </PanelHeader>
@@ -423,9 +422,9 @@ function LoadingBlock({ message }) {
 
 function SummaryMetric({ label, value }) {
   return (
-    <div className="rounded-md border border-rule bg-paper px-4 py-2.5">
+    <div className="rounded-md border border-rule bg-paper px-3 py-2.5 sm:px-4">
       <p className="text-xs text-ink-muted">{label}</p>
-      <p className="mt-1 text-xl font-medium text-ink">{value}</p>
+      <p className="mt-0.5 text-lg font-semibold text-ink">{value}</p>
     </div>
   );
 }
@@ -435,12 +434,12 @@ function MemberRow({ member, currentUser, savingRoleId, onRoleChange, onRemove, 
   const saving = savingRoleId === member.id;
 
   return (
-    <li className="px-4 py-3.5 sm:px-5">
+    <li className={`px-4 py-3.5 transition-colors sm:px-5 ${isSelf ? 'bg-paper-deep/45' : 'hover:bg-paper-deep/35'}`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <Avatar name={memberName(member)} size={34} />
+          <Avatar name={memberName(member)} size={38} />
           <div className="min-w-0">
-            <p className="text-sm font-medium text-ink truncate">
+            <p className="truncate text-sm font-semibold text-ink">
               {memberName(member)}
               {isSelf && <span className="ml-1 text-[11px] text-ink-muted">(you)</span>}
             </p>
@@ -459,7 +458,7 @@ function MemberRow({ member, currentUser, savingRoleId, onRoleChange, onRemove, 
                   {ROLES.map((roleOption) => <option key={roleOption.value} value={roleOption.value}>{roleOption.label}</option>)}
                 </Select>
               </div>
-              <Button variant="ghost" size="sm" onClick={onRemove} disabled={isSelf || saving} iconLeft={<X size={14} />}>
+              <Button variant="danger" size="sm" onClick={onRemove} disabled={isSelf || saving} iconLeft={<X size={14} />}>
                 Remove
               </Button>
             </>

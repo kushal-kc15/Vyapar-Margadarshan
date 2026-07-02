@@ -5,14 +5,22 @@ import {
   ArrowUpRight,
   BarChart3,
   Calendar,
+  ChevronDown,
+  ChevronUp,
   Download,
   Filter,
+  Lightbulb,
   RefreshCw,
+  ScanSearch,
   Search,
+  ShieldCheck,
+  Sparkles,
+  X,
 } from "lucide-react";
 import api from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { Panel, PanelHeader, PanelTitle } from "../components/Panel.jsx";
+import { Modal } from "../components/Modal.jsx";
 import { Select, Input } from "../components/Field.jsx";
 import { BarChart, DonutChart } from "../components/Charts.jsx";
 import { Money } from "../components/Money.jsx";
@@ -33,6 +41,12 @@ const PRESETS = [
   { value: "last_30_days", label: "Last 30 days" },
   { value: "this_year", label: "This year" },
   { value: "custom", label: "Custom" },
+];
+
+const AI_PERIODS = [
+  { value: "this_month", label: "This month" },
+  { value: "last_month", label: "Last month" },
+  { value: "last_3_months", label: "Last 3 months" },
 ];
 
 const CHART_COLORS = [
@@ -118,6 +132,7 @@ export default function Reports() {
   const { currency, organization } = useAuth();
   const toast = useToast();
   const requestRef = useRef(0);
+  const exportMenuRef = useRef(null);
 
   const initialRange = useMemo(() => presetBounds("this_month"), []);
   const [preset, setPreset] = useState("this_month");
@@ -131,6 +146,7 @@ export default function Reports() {
   const [loadError, setLoadError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [expensePage, setExpensePage] = useState(1);
 
   const organizationId = organization?.id ?? "";
@@ -153,6 +169,26 @@ export default function Reports() {
   useEffect(() => {
     setExpensePage(1);
   }, [preset, from, to, category, vendor, organizationId]);
+
+  useEffect(() => {
+    if (!exportMenuOpen) return undefined;
+
+    const closeMenu = (event) => {
+      if (!exportMenuRef.current?.contains(event.target)) {
+        setExportMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setExportMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", closeMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [exportMenuOpen]);
 
   const trendPeriod = useMemo(
     () => trendPeriodForRange(preset, from, to),
@@ -261,32 +297,42 @@ export default function Reports() {
     setVendorInput("");
   };
 
-  const exportCsv = useCallback(async () => {
+  const exportReport = useCallback(async (format) => {
     if (exporting || loading || !hasReportData || !organizationId || !from || !to) {
       return;
     }
 
-    setExporting(true);
+    setExportMenuOpen(false);
+    setExporting(format);
     try {
-      const response = await api.get("/analytics/export-csv/", {
+      const response = await api.get(`/analytics/export-${format}/`, {
         params,
         responseType: "blob",
       });
+      const contentType =
+        format === "pdf" ? "application/pdf" : "text/csv;charset=utf-8";
       const blob =
         response.data instanceof Blob
           ? response.data
-          : new Blob([response.data], { type: "text/csv;charset=utf-8" });
+          : new Blob([response.data], { type: contentType });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `approved-expense-report_${from}_${to}.csv`;
+      link.download =
+        format === "csv"
+          ? `approved-expense-report_${from}_${to}.csv`
+          : `Vyapar_Margadarshan_Report_${from}_to_${to}.pdf`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      toast.success("Approved expense report exported.");
+      toast.success(
+        format === "csv"
+          ? "Approved expense report exported."
+          : "PDF expense report exported.",
+      );
     } catch {
-      toast.error("Could not export the approved expense report.");
+      toast.error(`Could not export the ${format.toUpperCase()} expense report.`);
     } finally {
       setExporting(false);
     }
@@ -295,15 +341,45 @@ export default function Reports() {
   const pageActions = useMemo(
     () => (
       <>
-        <Button
-          variant="secondary"
-          size="sm"
-          iconLeft={<Download size={14} />}
-          onClick={exportCsv}
-          disabled={exporting || loading || !hasReportData || !organizationId}
-        >
-          {exporting ? "Exporting..." : "Export CSV"}
-        </Button>
+        <div ref={exportMenuRef} className="relative">
+          <Button
+            variant="secondary"
+            size="sm"
+            iconLeft={<Download size={14} />}
+            onClick={() => setExportMenuOpen((open) => !open)}
+            disabled={exporting || loading || !hasReportData || !organizationId}
+            aria-haspopup="menu"
+            aria-expanded={exportMenuOpen}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              {exporting ? "Exporting..." : "Export"}
+              <ChevronDown size={13} aria-hidden="true" />
+            </span>
+          </Button>
+          {exportMenuOpen ? (
+            <div
+              role="menu"
+              className="absolute right-0 z-30 mt-1.5 w-44 overflow-hidden rounded-md border border-rule bg-paper py-1 shadow-lg"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="block w-full px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-paper-deep focus:bg-paper-deep focus:outline-none"
+                onClick={() => exportReport("csv")}
+              >
+                Export as CSV
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="block w-full px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-paper-deep focus:bg-paper-deep focus:outline-none"
+                onClick={() => exportReport("pdf")}
+              >
+                Export as PDF
+              </button>
+            </div>
+          ) : null}
+        </div>
         <Button
           variant="secondary"
           size="sm"
@@ -315,7 +391,14 @@ export default function Reports() {
         </Button>
       </>
     ),
-    [exportCsv, exporting, loading, hasReportData, organizationId],
+    [
+      exportMenuOpen,
+      exportReport,
+      exporting,
+      loading,
+      hasReportData,
+      organizationId,
+    ],
   );
 
   return (
@@ -439,6 +522,7 @@ export default function Reports() {
         </div>
       </section>
 
+      <div className="mt-3 min-w-0">
       {!organizationId ? (
         <EmptyState
           title="Select a workspace"
@@ -726,7 +810,377 @@ export default function Reports() {
           </Panel>
         </>
       )}
+      </div>
     </div>
+  );
+}
+
+const RULE_TONES = {
+  danger: "bg-cinnabar-50 text-cinnabar-700 ring-cinnabar-200",
+  warning: "bg-saffron-50 text-saffron-700 ring-saffron-200",
+  info: "bg-forest-50 text-forest-700 ring-forest-200",
+  success: "bg-moss-50 text-moss-700 ring-moss-200",
+};
+
+const advisoryKey = (advisory) =>
+  `${advisory.code}-${advisory.evidence?.budget_id ?? advisory.title}`;
+
+function RuleBasedAdviceCard({ advisories, hadAdvisories, loading, error, currency, onClear, onShowAll }) {
+  const visibleAdvisories = advisories.slice(0, 3);
+
+  return (
+    <Panel className="overflow-hidden" aria-label="Rule-Based Spending Advice">
+      <header className="border-b border-rule px-4 py-3">
+        <div className="flex items-start gap-2.5">
+          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-forest-50 text-forest-700 ring-1 ring-forest-200">
+            <ShieldCheck size={14} aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-start justify-between gap-1.5">
+              <PanelTitle className="!text-sm">Rule-Based Spending Advice</PanelTitle>
+              <span className="inline-flex rounded-sm bg-forest-50 px-1.5 py-0.5 text-[11px] font-medium text-forest-700 ring-1 ring-forest-200">
+                Fixed rules
+              </span>
+            </div>
+            <p className="mt-1 text-xs leading-snug text-ink-muted">
+              Deterministic checks based on approved expenses and budget usage.
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <div className="px-4 py-2.5">
+        {loading ? (
+          <div className="flex items-center gap-2 text-xs text-ink-muted">
+            <Spinner className="h-4 w-4" />
+            <span>Checking approved spending and budgets...</span>
+          </div>
+        ) : error ? (
+          <p className="text-sm text-cinnabar-700">{error}</p>
+        ) : advisories.length === 0 ? (
+          <div className="flex items-center gap-2 text-sm text-ink-soft">
+            <ShieldCheck size={16} className="shrink-0 text-moss-600" aria-hidden="true" />
+            <span>{hadAdvisories ? "All advice cleared for this report." : "No rule-based warnings for the selected period."}</span>
+          </div>
+        ) : (
+          <>
+            <ul className="divide-y divide-rule">
+              {visibleAdvisories.map((advisory) => (
+                <li key={advisoryKey(advisory)} className="py-2.5 first:pt-0 last:pb-0">
+                  <AdviceItem advisory={advisory} currency={currency} onClear={onClear} compact />
+                </li>
+              ))}
+            </ul>
+            {advisories.length > 3 && (
+              <button
+                type="button"
+                onClick={onShowAll}
+                className="mt-2 w-full border-t border-rule pt-2 text-left text-xs font-semibold text-forest-700 hover:text-forest-600"
+              >
+                Show all {advisories.length} advice checks
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function AdviceItem({ advisory, currency, onClear, compact = false }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-1.5">
+        <p className={`${compact ? "text-xs" : "text-sm"} min-w-0 flex-1 font-semibold leading-snug text-ink`}>
+          {advisory.title}
+        </p>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className={`inline-flex rounded-sm px-1.5 py-0.5 text-[11px] font-semibold capitalize ring-1 ${RULE_TONES[advisory.severity] ?? RULE_TONES.info}`}>
+            {advisory.severity}
+          </span>
+          <button
+            type="button"
+            onClick={() => onClear(advisory)}
+            className="inline-flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] font-medium text-ink-muted transition-colors hover:bg-paper-deep hover:text-ink"
+            aria-label={`Clear ${advisory.title}`}
+            title="Clear this advice until report filters change"
+          >
+            <X size={12} aria-hidden="true" />
+            Clear
+          </button>
+        </div>
+      </div>
+      <p className={`${compact ? "text-xs" : "text-sm"} mt-1 leading-snug text-ink-soft`}>{advisory.message}</p>
+      <p className="mt-1.5 flex gap-1.5 text-xs leading-snug text-ink-muted">
+        <Lightbulb size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+        <span>{advisory.recommendation}</span>
+      </p>
+      <RuleEvidence evidence={advisory.evidence} currency={currency} />
+    </div>
+  );
+}
+
+function RuleAdviceModal({ open, onClose, advisories, currency, onClear }) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="All Rule-Based Spending Advice"
+      description="Review or clear individual checks for the current report period."
+      size="xl"
+      contentClassName="!py-2"
+    >
+      {advisories.length === 0 ? (
+        <div className="flex items-center gap-2 py-6 text-sm text-ink-soft">
+          <ShieldCheck size={17} className="text-moss-600" aria-hidden="true" />
+          <span>All advice has been cleared for this report.</span>
+        </div>
+      ) : (
+        <ul className="divide-y divide-rule">
+          {advisories.map((advisory) => (
+            <li key={advisoryKey(advisory)} className="py-3.5">
+              <AdviceItem advisory={advisory} currency={currency} onClear={onClear} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
+  );
+}
+
+function RuleEvidence({ evidence, currency }) {
+  if (!evidence) return null;
+  const percentage = evidence.percentage_used ?? evidence.percentage ?? evidence.increase_percentage;
+  const amount = evidence.spent_amount ?? evidence.amount ?? evidence.current_total;
+  if (percentage == null && amount == null) return null;
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-muted">
+      {percentage != null && <span className="num rounded-sm bg-paper-deep px-1.5 py-0.5">{Number(percentage).toFixed(1)}%</span>}
+      {amount != null && (
+        <span className="num rounded-sm bg-paper-deep px-1.5 py-0.5">
+          <Money value={Number(amount)} currency={currency} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+const ANOMALY_TONES = {
+  HIGH: "bg-cinnabar-50 text-cinnabar-700 ring-cinnabar-200",
+  MEDIUM: "bg-saffron-50 text-saffron-700 ring-saffron-200",
+  LOW: "bg-forest-50 text-forest-700 ring-forest-200",
+};
+
+const ANOMALY_REASON_LABELS = {
+  HIGH_CATEGORY_AMOUNT: "Higher than usual category spending",
+  HIGH_VENDOR_AMOUNT: "Higher than usual vendor spending",
+  DUPLICATE_CANDIDATE: "Possible duplicate",
+  NEW_VENDOR: "New vendor",
+  WEEKEND_EXPENSE: "Weekend expense",
+};
+
+function UnusualExpenseCard({ data, loading, error, currency }) {
+  const anomalies = data?.anomalies ?? [];
+  const visible = anomalies.slice(0, 5);
+  const hiddenCount = Math.max(0, anomalies.length - visible.length);
+
+  return (
+    <Panel className="overflow-hidden" aria-label="Unusual Expense Detection">
+      <header className="border-b border-rule px-4 py-3">
+        <div className="flex items-start gap-2.5">
+          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-saffron-50 text-saffron-700 ring-1 ring-saffron-200">
+            <ScanSearch size={14} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <PanelTitle className="!text-sm">Unusual Expense Detection</PanelTitle>
+            <p className="mt-1 text-xs leading-snug text-ink-muted">
+              Weighted rule-based checks for unusual approved or pending expenses.
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <div className="px-4 py-2.5">
+        {loading ? (
+          <div className="flex items-center gap-2 text-xs text-ink-muted">
+            <Spinner className="h-4 w-4" />
+            <span>Checking expense patterns...</span>
+          </div>
+        ) : error ? (
+          <p className="text-xs text-cinnabar-700">{error}</p>
+        ) : anomalies.length === 0 ? (
+          <div className="flex items-center gap-2 text-xs text-ink-soft">
+            <ShieldCheck size={15} className="shrink-0 text-moss-600" aria-hidden="true" />
+            <span>No unusual expenses detected for this period.</span>
+          </div>
+        ) : (
+          <>
+            <ul className="divide-y divide-rule">
+              {visible.map((expense) => (
+                <li key={expense.expense_id} className="py-2.5 first:pt-0 last:pb-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-ink">{expense.title || "Untitled expense"}</p>
+                      <p className="mt-0.5 truncate text-[11px] text-ink-muted">{expense.vendor || "No vendor"}</p>
+                    </div>
+                    <Money value={expense.amount} currency={currency} className="shrink-0 text-xs font-semibold" />
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <span className={`rounded-sm px-1.5 py-0.5 text-[11px] font-semibold ring-1 ${ANOMALY_TONES[expense.severity] ?? ANOMALY_TONES.LOW}`}>
+                      {expense.severity}
+                    </span>
+                    <span className="num rounded-sm bg-paper-deep px-1.5 py-0.5 text-[11px] font-medium text-ink-soft">
+                      Anomaly Score {expense.score}
+                    </span>
+                    <span className="rounded-sm bg-paper-deep px-1.5 py-0.5 text-[11px] capitalize text-ink-muted">
+                      {String(expense.status || "").toLowerCase()}
+                    </span>
+                  </div>
+                  <ul className="mt-1.5 space-y-0.5 text-[11px] leading-snug text-ink-muted">
+                    {(expense.reasons ?? []).slice(0, 3).map((reason) => (
+                      <li key={reason.code}>• {ANOMALY_REASON_LABELS[reason.code] ?? reason.message}</li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+            {hiddenCount > 0 && (
+              <p className="mt-2 border-t border-rule pt-2 text-xs font-medium text-ink-muted">
+                +{hiddenCount} more unusual {hiddenCount === 1 ? "expense" : "expenses"}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function AIInsightsCard({
+  period,
+  onPeriodChange,
+  data,
+  loading,
+  error,
+  expanded,
+  onToggle,
+  onGenerate,
+}) {
+  const hasResult = Boolean(data || error);
+  const insights = data?.insights ?? [];
+  const warnings = data?.warnings ?? [];
+  const recommendations = data?.recommendations ?? [];
+
+  return (
+    <Panel className="overflow-hidden">
+      <div className="flex flex-col gap-3 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-saffron-50 text-saffron-700 ring-1 ring-saffron-200">
+            <Sparkles size={16} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <PanelTitle className="!text-sm">AI Expense Insights</PanelTitle>
+              {hasResult && (
+                <button
+                  type="button"
+                  onClick={onToggle}
+                  aria-expanded={expanded}
+                  aria-label={expanded ? "Collapse AI insights" : "Expand AI insights"}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-ink-muted hover:bg-paper-deep hover:text-ink"
+                >
+                  {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-ink-muted">
+              Generate business-friendly insights from approved expenses.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex min-w-0 items-center gap-2">
+          <label className="sr-only" htmlFor="ai-insight-period">Insight period</label>
+          <select
+            id="ai-insight-period"
+            value={period}
+            onChange={onPeriodChange}
+            disabled={loading}
+            className="h-8 min-w-0 flex-1 rounded-md border border-rule bg-paper px-2 text-xs text-ink focus:border-saffron-500 focus:outline-none focus:ring-2 focus:ring-saffron-500/15 disabled:opacity-60"
+          >
+            {AI_PERIODS.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+          <Button
+            variant="secondary"
+            size="xs"
+            iconLeft={<Sparkles size={13} />}
+            onClick={onGenerate}
+            disabled={loading}
+          >
+            {loading ? "Analyzing..." : "Generate insights"}
+          </Button>
+        </div>
+      </div>
+
+      {loading && (
+        <div className="flex items-center gap-2 border-t border-rule px-4 py-3 text-xs text-ink-muted">
+          <Spinner className="h-4 w-4" />
+          <span>Analyzing approved expenses...</span>
+        </div>
+      )}
+
+      {!loading && expanded && (
+        <div className="border-t border-rule px-4 py-3 text-sm">
+          {error ? (
+            <p className="text-cinnabar-700">{error}</p>
+          ) : !data?.enough_data ? (
+            <p className="text-ink-muted">Not enough approved expenses to generate insights.</p>
+          ) : (
+            <div className="grid gap-3">
+              <div className="min-w-0">
+                <p className="text-sm leading-relaxed text-ink-soft">{data.summary}</p>
+                {insights.length > 0 && (
+                  <ul className="mt-2 grid gap-1 text-xs text-ink-soft">
+                    {insights.slice(0, 4).map((item) => (
+                      <li key={item} className="flex gap-1.5">
+                        <Sparkles size={12} className="mt-0.5 shrink-0 text-saffron-600" aria-hidden="true" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="grid gap-2 text-xs">
+                {warnings.length > 0 && (
+                  <div>
+                    <p className="flex items-center gap-1.5 font-medium text-cinnabar-700">
+                      <AlertTriangle size={13} aria-hidden="true" /> Warnings
+                    </p>
+                    <ul className="mt-1 space-y-1 text-ink-soft">
+                      {warnings.map((item) => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {recommendations.length > 0 && (
+                  <div>
+                    <p className="flex items-center gap-1.5 font-medium text-forest-700">
+                      <Lightbulb size={13} aria-hidden="true" /> Recommendations
+                    </p>
+                    <ul className="mt-1 space-y-1 text-ink-soft">
+                      {recommendations.map((item) => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Panel>
   );
 }
 

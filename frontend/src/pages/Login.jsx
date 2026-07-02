@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff, Mail, RotateCcw, ShieldCheck } from 'lucide-react';
-import Logo from '../components/Logo.jsx';
+import AuthLayout from '../components/AuthLayout.jsx';
 import Button from '../components/Button.jsx';
 import { Checkbox, Input } from '../components/Field.jsx';
 import GoogleSignInButton from '../components/GoogleSignInButton.jsx';
@@ -212,36 +212,30 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2 bg-paper">
-      {/* Left — form */}
-      <div className="flex flex-col px-4 py-6 sm:px-10 sm:py-8 lg:px-16">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <Link to="/">
-            <Logo size={28} withWordmark wordmarkSize="lg" />
-          </Link>
-          {view === 'password' && (
+    <AuthLayout
+      headerAction={
+        view === 'password' ? (
             <Link
               to={pendingInvite ? getInviteRegisterPath(pendingInvite) : "/register"}
               className="text-sm text-ink-soft hover:text-ink transition-colors"
             >
               Need an account? <span className="text-cinnabar-600 font-medium">Create one</span>
             </Link>
-          )}
-        </div>
-
-        <div className="flex-1 flex items-center py-8 sm:py-10">
-          <div className="w-full max-w-sm mx-auto">
+        ) : null
+      }
+    >
+          <div className="w-full">
             {view === 'password' && (
               <>
                 <h1 className="font-display text-3xl sm:text-4xl font-medium text-ink leading-tight tracking-tight">
                   Welcome back
                 </h1>
                 <p className="mt-2 text-sm text-ink-muted">
-                  Sign in to continue to your workspace.
+                  Sign in to manage your workspace expenses.
                 </p>
 
                 {pendingInvite && (
-                  <div className="mt-5 px-3 py-2 bg-paper-deep border-l-2 border-cinnabar-500 text-xs text-ink-soft">
+                  <div className="mt-5 rounded-sm border border-rule bg-paper-deep px-3 py-2 text-xs text-ink-soft">
                     You have an invitation. We’ll add you to the workspace after sign-in.
                   </div>
                 )}
@@ -435,31 +429,6 @@ export default function Login() {
               </>
             )}
           </div>
-        </div>
-
-        <p className="text-xs text-ink-faint">Vyapar Margadarshan</p>
-      </div>
-
-      {/* Right — quiet guidance */}
-      <div className="hidden lg:flex relative bg-paper-deep border-l border-rule p-12 flex-col">
-        <div className="flex-1 flex items-center justify-center">
-          <div className="w-full max-w-sm">
-            <p className="text-micro uppercase tracking-eyebrow text-ink-muted mb-3">
-              A ledger, not a dashboard
-            </p>
-            <p className="text-sm text-ink-soft leading-relaxed">
-              Every transaction here is a real entry in your book. No fluff, no
-              fake metrics – just the numbers that matter.
-            </p>
-            <div className="mt-6 border-t border-rule pt-6">
-              <p className="text-xs text-ink-muted">
-                <span className="block font-medium text-ink">Trust the page.</span>
-                Sign in to see your own entries.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    </AuthLayout>
   );
 }

@@ -18,6 +18,7 @@ def create_notification(
     related_object_type=None,
     related_object_id=None,
     action_url=None,
+    metadata=None,
 ):
     """
     Create an in-app notification for a user.
@@ -32,6 +33,7 @@ def create_notification(
         related_object_type=related_object_type,
         related_object_id=related_object_id,
         action_url=action_url,
+        metadata=metadata or {},
     )
 
 

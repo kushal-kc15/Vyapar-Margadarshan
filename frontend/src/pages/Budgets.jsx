@@ -22,6 +22,7 @@ import { EmptyState, ErrorState, Spinner } from "../components/Feedback.jsx";
 import PaginationControls from "../components/PaginationControls.jsx";
 import { cn } from "../lib/utils.js";
 import { BUDGET_CATEGORIES, formatCategoryLabel } from "../lib/categories.js";
+import { formatDate } from "../lib/date.js";
 
 const PERIODS = [
   { value: "DAILY", label: "Daily" },
@@ -36,6 +37,32 @@ const periodLabel = (value) =>
   PERIODS.find((period) => period.value === value)?.label ?? value ?? "Monthly";
 
 const budgetName = (budget) => budget?.name || categoryLabel(budget?.category);
+
+const inputDate = (date) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+};
+
+const deriveEndDate = (period, startValue) => {
+  if (!startValue) return "";
+  const start = new Date(`${startValue}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return "";
+  const end = new Date(start);
+  if (period === "DAILY") return startValue;
+  if (period === "WEEKLY") end.setDate(end.getDate() + 6);
+  else if (period === "YEARLY") {
+    end.setFullYear(end.getFullYear() + 1);
+    end.setDate(end.getDate() - 1);
+  } else {
+    const nextMonth = start.getMonth() + 1;
+    const nextYear = start.getFullYear() + Math.floor(nextMonth / 12);
+    const monthIndex = nextMonth % 12;
+    const lastDay = new Date(nextYear, monthIndex + 1, 0).getDate();
+    end.setFullYear(nextYear, monthIndex, Math.min(start.getDate(), lastDay));
+    end.setDate(end.getDate() - 1);
+  }
+  return inputDate(end);
+};
 
 const budgetMath = (budget) => {
   const amount = Number(budget.amount) || 0;
@@ -65,6 +92,7 @@ export default function Budgets() {
   const { currency, role } = useAuth();
   const toast = useToast();
   const [rows, setRows] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [categories] = useState(BUDGET_CATEGORIES);
 
   const [loading, setLoading] = useState(true);
@@ -80,22 +108,29 @@ export default function Budgets() {
   const [budgetPage, setBudgetPage] = useState(1);
 
   const isExplicitStaff = String(role ?? "").toUpperCase() === "STAFF";
-  const canManage = !isExplicitStaff;
+  const canManage = String(role ?? "").toUpperCase() === "OWNER";
 
   const refresh = useCallback(() => {
     setLoading(true);
     setLoadError("");
-    api
-      .get("/budgets/", { params: { page_size: 100 } })
-      .then((response) => {
-        const data = response.data?.results ?? response.data ?? [];
+    Promise.all([
+      api.get("/budgets/", { params: { page_size: 100 } }),
+      api.get("/budgets/summary/"),
+    ])
+      .then(([listResponse, summaryResponse]) => {
+        const data = listResponse.data?.results ?? listResponse.data ?? [];
         setRows(Array.isArray(data) ? data : []);
+        setSummary(summaryResponse.data ?? null);
       })
-      .catch(() => {
+      .catch((error) => {
         setRows([]);
-        setLoadError(
-          "Budgets could not be loaded. Existing budget limits were not changed.",
-        );
+        setSummary(null);
+        const data = error?.response?.data;
+        const detail =
+          (typeof data?.detail === "string" && data.detail) ||
+          (typeof data?.error === "string" && data.error) ||
+          (typeof data?.message === "string" && data.message);
+        setLoadError(detail || "Budgets could not be loaded. Existing budget limits were not changed.");
       })
       .finally(() => setLoading(false));
   }, []);
@@ -116,19 +151,11 @@ export default function Budgets() {
   const activeRows = decoratedRows.filter(
     ({ budget }) => budget.is_active !== false,
   );
-  const totalAllocated = activeRows.reduce((sum, row) => sum + row.amount, 0);
-  const totalSpent = activeRows.reduce((sum, row) => sum + row.spent, 0);
-  const totalRemaining = totalAllocated - totalSpent;
-  const totalPct =
-    totalAllocated > 0 ? Math.round((totalSpent / totalAllocated) * 100) : 0;
-  const nearLimit = activeRows.filter((row) => row.tone === "warn").length;
-  const overBudget = activeRows.filter((row) => row.tone === "over").length;
-  const budgetStatus =
-    overBudget > 0
-      ? "Over budget"
-      : nearLimit > 0
-        ? "Watch closely"
-        : "On track";
+  const activeBudgetCount = Number(summary?.total_budgets) || activeRows.length;
+  const totalAllocated = Number(summary?.total_allocated) || 0;
+  const approvedSpend = Number(summary?.total_spent) || 0;
+  const attentionCount =
+    (Number(summary?.at_risk_count) || 0) + (Number(summary?.exceeded_count) || 0);
 
   const filteredRows = decoratedRows
     .filter(({ budget }) => {
@@ -247,9 +274,14 @@ export default function Budgets() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 pt-2 pb-4 sm:px-6 sm:pt-2 sm:pb-5 lg:px-10">
+    <div className="mx-auto w-full max-w-7xl px-4 pb-6 pt-2 sm:px-6 lg:px-8">
       <div className="mb-2 flex flex-wrap items-center justify-end gap-1.5 border-b border-rule pb-2" aria-label="Budget actions">
         {pageActions}
+      </div>
+
+      <div className="space-y-1.5 border-b border-rule pb-2 text-xs text-ink-muted">
+        <p>Budgets track approved expenses only. Pending and rejected expenses do not affect usage.</p>
+        <p>All Categories is an overall budget and can exist alongside category budgets.</p>
       </div>
 
       {isExplicitStaff && (
@@ -260,7 +292,7 @@ export default function Budgets() {
           <div>
             <p className="text-ink">Read-only access</p>
             <p className="mt-0.5 text-xs text-ink-muted">
-              Budgets are managed by owners. You can view budget usage but cannot make changes.
+              You can view budgets, but only owners can manage them.
             </p>
           </div>
         </div>
@@ -271,62 +303,35 @@ export default function Budgets() {
         aria-label="Budget summary"
       >
         <div className="flex flex-col gap-2">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm font-medium text-ink">Budget summary</p>
-            <div className="w-full sm:w-56">
-              <BudgetBar
-                pct={totalPct}
-                tone={totalPct >= 100 ? "over" : totalPct >= 80 ? "warn" : "ok"}
-                compact
-              />
-            </div>
-          </div>
+          <p className="text-sm font-medium text-ink">Budget summary</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryMetric
-              label="Total budget"
+              label="Active budgets"
+              value={activeBudgetCount}
+              helper="Current workspace"
+            />
+            <SummaryMetric
+              label="Total allocated"
               value={<Money value={totalAllocated} currency={currency} />}
-              helper={`${activeRows.length} active ${activeRows.length === 1 ? "budget" : "budgets"}`}
+              helper="Across active limits"
             />
             <SummaryMetric
-              label="Total spent"
-              value={<Money value={totalSpent} currency={currency} />}
+              label="Approved spend"
+              value={<Money value={approvedSpend} currency={currency} />}
+              helper="Unique spend in covered periods"
             />
             <SummaryMetric
-              label={totalRemaining < 0 ? "Overspent by" : "Remaining"}
-              value={
-                <Money value={Math.abs(totalRemaining)} currency={currency} />
-              }
-              danger={totalRemaining < 0}
-            />
-            <SummaryMetric
-              label="Status"
-              value={budgetStatus}
-              helper={
-                overBudget > 0
-                  ? `${overBudget} exceeded`
-                  : nearLimit > 0
-                    ? `${nearLimit} near limit`
-                    : "Healthy"
-              }
-              danger={overBudget > 0}
+              label="Need attention"
+              value={attentionCount}
+              helper={`${Number(summary?.at_risk_count) || 0} near · ${Number(summary?.exceeded_count) || 0} exceeded`}
+              danger={attentionCount > 0}
             />
           </div>
-          {totalPct > 100 && (
-            <div className="flex items-center gap-2 rounded-sm border border-saffron-200 bg-saffron-50 px-2.5 py-1.5 text-xs text-saffron-700">
-              <AlertTriangle
-                size={14}
-                className="shrink-0"
-                strokeWidth={1.5}
-                aria-hidden="true"
-              />
-              <p>Budget exceeded. Review highlighted categories below.</p>
-            </div>
-          )}
         </div>
       </section>
 
       <section
-        className="mt-2 border-y border-rule py-2"
+        className="mt-3 rounded-md border border-rule bg-paper-deep/50 px-3 py-2.5"
         aria-label="Budget filters"
       >
         <div className="grid grid-cols-1 gap-2 md:grid-cols-12 md:items-end">
@@ -395,8 +400,8 @@ export default function Budgets() {
         </div>
       </section>
 
-      <Panel className="mt-2">
-        <PanelHeader className="!px-4 !py-2.5">
+      <Panel className="mt-3 overflow-hidden">
+        <PanelHeader className="!px-4 !py-3">
           <PanelTitle className="!text-base">Budget limits</PanelTitle>
         </PanelHeader>
 
@@ -485,7 +490,6 @@ export default function Budgets() {
         <BudgetEditor
           editing={editing}
           categories={categories}
-          defaultCurrency={currency}
           onClose={() => setModalOpen(false)}
           onSaved={() => {
             setModalOpen(false);
@@ -530,7 +534,7 @@ function BudgetRow({
   const remainingValue = <Money value={remainingAbs} currency={currency} />;
 
   return (
-    <li className="px-4 py-2.5 sm:px-5">
+    <li className="px-4 py-3 transition-colors hover:bg-paper-deep/35 sm:px-5">
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-12 lg:items-center">
         <div className="lg:col-span-4 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -554,6 +558,14 @@ function BudgetRow({
           <p className="mt-1 text-xs text-ink-muted break-words">
             {categoryLabel(budget.category)} - {periodLabel(budget.period)}
           </p>
+          <p className="mt-0.5 text-[11px] text-ink-muted">
+            {formatDate(budget.start_date, "short")} - {formatDate(budget.end_date, "short")}
+          </p>
+          {budget.category === "ALL" && (
+            <p className="mt-0.5 text-[11px] text-ink-faint">
+              Overall approved spending limit
+            </p>
+          )}
         </div>
 
         <div className={canManage ? "lg:col-span-5" : "lg:col-span-8"}>
@@ -574,7 +586,7 @@ function BudgetRow({
             <span
               className={cn(
                 "num",
-                isExceeded ? "text-saffron-700" : "text-ink-muted",
+                isExceeded ? "text-cinnabar-700" : "text-ink-muted",
               )}
             >
               {isExceeded ? "Overspent by " : "Remaining "}
@@ -582,6 +594,9 @@ function BudgetRow({
             </span>
             <span className="num shrink-0 text-ink-muted">{pct}% used</span>
           </div>
+          <p className="mt-1 text-[11px] text-ink-faint">
+            Alert at {Number(budget.alert_threshold) || 80}%
+          </p>
         </div>
 
         <div className="lg:col-span-3">
@@ -626,11 +641,11 @@ function BudgetRow({
 
 function SummaryMetric({ label, value, helper, danger = false }) {
   return (
-    <div className="rounded-sm border border-rule bg-paper-deep/30 px-3 py-2">
+    <div className="rounded-md border border-rule bg-paper px-3 py-2.5">
       <p className="text-xs text-ink-muted">{label}</p>
       <p
         className={cn(
-          "num mt-0.5 text-lg font-medium",
+          "mt-0.5 text-lg font-semibold tabular-nums",
           danger ? "text-saffron-700" : "text-ink",
         )}
       >
@@ -647,7 +662,7 @@ function RiskLabel({ tone, label }) {
       className={cn(
         "inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[11px] font-medium",
         tone === "over"
-          ? "border-saffron-200 bg-saffron-50 text-saffron-700"
+          ? "border-cinnabar-200 bg-cinnabar-50 text-cinnabar-700"
           : tone === "warn"
             ? "border-saffron-200 bg-saffron-50 text-saffron-700"
             : "border-moss-500/20 bg-moss-50 text-moss-700",
@@ -666,7 +681,7 @@ function RiskLabel({ tone, label }) {
 function BudgetBar({ pct, tone, compact = false }) {
   const color =
     tone === "over"
-      ? "bg-saffron-500"
+      ? "bg-cinnabar-500"
       : tone === "warn"
         ? "bg-saffron-500"
         : tone === "paused"
@@ -705,7 +720,6 @@ function BudgetBar({ pct, tone, compact = false }) {
 function BudgetEditor({
   editing,
   categories,
-  defaultCurrency,
   onClose,
   onSaved,
 }) {
@@ -715,13 +729,15 @@ function BudgetEditor({
     category: editing?.category ?? "",
     amount: editing?.amount ?? "",
     period: editing?.period ?? "MONTHLY",
-    start_date: editing?.start_date ?? new Date().toISOString().slice(0, 10),
+    start_date: editing?.start_date ?? inputDate(new Date()),
+    alert_threshold: editing?.alert_threshold ?? 80,
     is_active: editing?.is_active ?? true,
   }));
   const [err, setErr] = useState({});
   const [saving, setSaving] = useState(false);
   const update = (key) => (event) =>
     setForm((current) => ({ ...current, [key]: event.target.value }));
+  const previewEndDate = deriveEndDate(form.period, form.start_date);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -734,6 +750,7 @@ function BudgetEditor({
         amount: form.amount,
         period: form.period,
         start_date: form.start_date,
+        alert_threshold: form.alert_threshold,
         is_active: form.is_active,
       };
       if (editing) await api.patch(`/budgets/${editing.id}/`, payload);
@@ -791,26 +808,9 @@ function BudgetEditor({
             </option>
           ))}
         </Select>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Input
-            type="number"
-            step="0.01"
-            min="0"
-            label="Budget amount"
-            value={form.amount}
-            onChange={update("amount")}
-            required
-            error={err.amount}
-          />
-          <Select label="Currency" value={defaultCurrency} disabled>
-            {["NPR", "INR", "USD", "EUR"].map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </Select>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Select
-            label="Period"
+            label="Budget period"
             value={form.period}
             onChange={update("period")}
             error={err.period}
@@ -821,15 +821,41 @@ function BudgetEditor({
               </option>
             ))}
           </Select>
+          <Input
+            type="date"
+            label="Starts on"
+            value={form.start_date}
+            onChange={update("start_date")}
+            required
+            error={err.start_date}
+          />
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            label="Limit amount"
+            value={form.amount}
+            onChange={update("amount")}
+            required
+            error={err.amount}
+          />
+          <Input
+            type="number"
+            min="1"
+            max="100"
+            label="Alert threshold"
+            value={form.alert_threshold}
+            onChange={update("alert_threshold")}
+            required
+            error={err.alert_threshold}
+            help="Percentage used before this budget is marked Near limit."
+          />
         </div>
-        <Input
-          type="date"
-          label="Starts on"
-          value={form.start_date}
-          onChange={update("start_date")}
-          required
-          error={err.start_date}
-        />
+        {form.start_date && previewEndDate && (
+          <p className="rounded-sm bg-paper-deep px-3 py-2 text-xs text-ink-muted">
+            This budget will track approved expenses from {formatDate(form.start_date, "short")} to {formatDate(previewEndDate, "short")}.
+          </p>
+        )}
         <div className="flex flex-col gap-3 border-t border-rule pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-ink-muted">
             Only active budgets are counted in the overview and risk list.

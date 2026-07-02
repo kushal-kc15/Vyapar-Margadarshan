@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, Check, Eye, EyeOff, Loader2 } from 'lucide-react';
-import Logo from '../components/Logo.jsx';
+import AuthLayout from '../components/AuthLayout.jsx';
 import Button from '../components/Button.jsx';
 import { Input } from '../components/Field.jsx';
 import api from '../lib/api.js';
@@ -85,18 +85,14 @@ export default function ResetPassword() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-paper">
-      <header className="px-4 py-5 sm:px-10 flex flex-wrap items-center justify-between gap-3">
-        <Link to="/">
-          <Logo size={28} withWordmark wordmarkSize="lg" />
-        </Link>
+    <AuthLayout
+      headerAction={
         <Link to="/login" className="text-sm text-ink-soft hover:text-ink transition-colors">
           Back to sign in
         </Link>
-      </header>
-
-      <main className="flex-1 flex items-center justify-center px-4 py-8 sm:px-10 sm:py-10">
-        <div className="w-full max-w-sm">
+      }
+    >
+        <div className="w-full">
           {tokenInvalid && (
             <div className="text-center space-y-4">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-cinnabar-50 border border-cinnabar-200 text-cinnabar-600">
@@ -215,7 +211,6 @@ export default function ResetPassword() {
             </>
           )}
         </div>
-      </main>
-    </div>
+    </AuthLayout>
   );
 }

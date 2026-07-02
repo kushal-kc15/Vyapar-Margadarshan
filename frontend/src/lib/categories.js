@@ -3,7 +3,7 @@
 
 export const EXPENSE_CATEGORIES = [
   { value: 'FOOD', label: 'Food & Dining' },
-  { value: 'TRANSPORT', label: 'Local Transportation' },
+  { value: 'TRANSPORT', label: 'Transportation' },
   { value: 'TRAVEL', label: 'Travel & Accommodation' },
   { value: 'OFFICE', label: 'Office Supplies' },
   { value: 'UTILITIES', label: 'Utilities' },

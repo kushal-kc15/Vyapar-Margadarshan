@@ -211,24 +211,26 @@ export default function Approvals() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-2 sm:px-6 sm:py-3 lg:px-10">
+    <div className="mx-auto w-full max-w-7xl px-4 pb-6 pt-2 sm:px-6 lg:px-8">
       <div className="mb-2 flex flex-wrap items-center justify-end gap-1.5 border-b border-rule pb-2" aria-label="Approval actions">
         {pageActions}
       </div>
 
       <div className="flex flex-col gap-2 border-b border-rule sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-1 overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Approval status">
           {TABS.map((item) => {
             const active = item.value === tab;
             return (
               <button
                 key={item.value}
                 type="button"
+                role="tab"
+                aria-selected={active}
                 onClick={() => setTab(item.value)}
                 className={cn(
-                  "h-9 shrink-0 px-3 text-sm transition-colors",
+                  "h-9 shrink-0 rounded-t-sm px-3 text-sm transition-colors",
                     active
-                    ? "text-ink font-medium border-b-2 border-moss-500 -mb-px"
+                    ? "-mb-px border-b-2 border-moss-500 bg-paper-deep/70 font-semibold text-ink"
                     : "text-ink-muted hover:text-ink",
                 )}
               >
@@ -259,8 +261,8 @@ export default function Approvals() {
 
       <div className="mt-3 grid grid-cols-12 gap-4 lg:gap-5">
         <div className="col-span-12 lg:col-span-5">
-          <Panel>
-            <PanelHeader>
+          <Panel className="overflow-hidden">
+            <PanelHeader className="!py-3">
               <div>
                 <PanelTitle>
                   {tab === "PENDING"
@@ -379,7 +381,7 @@ function ApprovalQueueItem({ expense, currency, active, onSelect }) {
         onClick={onSelect}
         className={cn(
           "w-full px-4 py-3.5 text-left transition-colors",
-          active ? "bg-paper-deep" : "hover:bg-paper-deep/60",
+          active ? "bg-forest-50 ring-1 ring-inset ring-forest-200" : "hover:bg-paper-deep/60",
         )}
       >
         <div className="flex items-start gap-3">
@@ -387,7 +389,7 @@ function ApprovalQueueItem({ expense, currency, active, onSelect }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-ink break-words sm:truncate">
+                <p className="break-words text-sm font-semibold text-ink sm:truncate">
                   {expenseTitle(expense)}
                 </p>
                 <p className="mt-0.5 text-xs text-ink-muted truncate">
@@ -434,8 +436,8 @@ function ApprovalDetail({
   onReject,
 }) {
   return (
-    <Panel>
-      <PanelHeader action={<StatusPill status={selected.status} />}>
+    <Panel className="overflow-hidden">
+      <PanelHeader className="!py-3" action={<StatusPill status={selected.status} />}>
         <div>
           <PanelTitle>{expenseTitle(selected)}</PanelTitle>
           <p className="mt-1 text-xs text-ink-muted break-words">
@@ -593,7 +595,7 @@ function ApprovalDetail({
               </p>
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
                 <Button
-                  variant="secondary"
+                  variant="danger"
                   onClick={onReject}
                   disabled={busy}
                   iconLeft={<X size={14} />}

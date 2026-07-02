@@ -1,15 +1,20 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowRight, Check, Eye, EyeOff } from "lucide-react";
-import Logo from "../components/Logo.jsx";
+import AuthLayout from "../components/AuthLayout.jsx";
 import Button from "../components/Button.jsx";
 import { Input } from "../components/Field.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useToast } from "../components/Toast.jsx";
-import { getInviteLoginPath, storePendingInviteToken } from "../lib/inviteFlow.js";
+import GoogleSignInButton from "../components/GoogleSignInButton.jsx";
+import {
+  getInviteLoginPath,
+  getInvitePath,
+  storePendingInviteToken,
+} from "../lib/inviteFlow.js";
 
 export default function Register() {
-  const { register } = useAuth();
+  const { register, googleLogin } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -24,6 +29,7 @@ export default function Register() {
   const [errors, setErrors] = useState({});
   const [existingAccountInvite, setExistingAccountInvite] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const [showPw, setShowPw] = useState(false);
   const [showPw2, setShowPw2] = useState(false);
@@ -43,6 +49,46 @@ export default function Register() {
     [pw],
   );
   const pwOk = pwChecks.every((c) => c.ok);
+
+  const handleGoogle = async (accessToken) => {
+  setGoogleLoading(true);
+  setErrors({});
+
+  try {
+    if (inviteToken) storePendingInviteToken(inviteToken);
+
+    const data = await googleLogin(accessToken);
+
+    toast.success("Welcome to Vyapar Margadarshan");
+
+    if (inviteToken) {
+      navigate(getInvitePath(inviteToken), { replace: true });
+      return;
+    }
+
+    const organization = Object.prototype.hasOwnProperty.call(
+      data ?? {},
+      "active_organization",
+    )
+      ? data.active_organization
+      : data?.organization ?? null;
+
+    const memberships = Array.isArray(data?.memberships) ? data.memberships : [];
+
+    if (!organization && memberships.length > 1) {
+      navigate("/workspace/start", { replace: true });
+    } else if (!organization) {
+      navigate("/workspace/start", { replace: true });
+    } else {
+      navigate("/dashboard", { replace: true });
+    }
+  } catch (err) {
+    const msg = err?.response?.data?.error || "Google sign-up failed";
+    toast.error(msg);
+  } finally {
+    setGoogleLoading(false);
+  }
+};
 
   const submit = async (e) => {
     e.preventDefault();
@@ -115,25 +161,21 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-paper">
-      <header className="px-4 py-5 sm:px-10 flex flex-wrap items-center justify-between gap-3">
-        <Link to="/">
-          <Logo size={28} withWordmark wordmarkSize="lg" />
-        </Link>
+    <AuthLayout
+      headerAction={
         <Link to="/login" className="text-sm text-ink-soft hover:text-ink transition-colors">
           Already have an account?{" "}
           <span className="text-cinnabar-600 font-medium">Sign in</span>
         </Link>
-      </header>
-
-      <main className="flex-1 flex items-center justify-center px-4 py-8 sm:px-10 sm:py-10">
-        <div className="w-full max-w-sm">
-          <div className="text-center">
+      }
+    >
+        <div className="w-full">
+          <div>
             <h1 className="font-display text-3xl sm:text-4xl font-medium text-ink leading-tight tracking-tight">
               Create your account
             </h1>
             <p className="mt-2 text-sm text-ink-muted">
-              Set up your account to start recording expenses.
+              Create an account with email, or continue with Google.
             </p>
 
             {inviteToken ? (
@@ -142,8 +184,22 @@ export default function Register() {
               </p>
             ) : null}
           </div>
+            <div className="mt-8 space-y-5">
+  <GoogleSignInButton
+    onSuccess={handleGoogle}
+    onError={() => toast.error("Google sign-up failed")}
+    disabled={googleLoading || loading}
+  />
 
-          <form onSubmit={submit} className="mt-8 space-y-5" noValidate>
+  <div className="flex items-center gap-3">
+    <span className="h-px flex-1 bg-rule" />
+    <span className="text-micro uppercase tracking-eyebrow text-ink-faint">
+      or with email
+    </span>
+    <span className="h-px flex-1 bg-rule" />
+  </div>
+</div>
+          <form onSubmit={submit} className="mt-5 space-y-5" noValidate>
             <Input
               label="Full name"
               value={form.full_name}
@@ -263,7 +319,6 @@ export default function Register() {
             </p>
           </form>
         </div>
-      </main>
-    </div>
+    </AuthLayout>
   );
 }

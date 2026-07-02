@@ -41,8 +41,9 @@ class BudgetAlertEmailTests(TestCase):
 
         self.assertTrue(sent)
         self.assertEqual(len(mail.outbox), 1)
-        self.assertIn('Period: Monthly', mail.outbox[0].body)
-        self.assertIn('Monthly', mail.outbox[0].alternatives[0][0])
+        self.assertIn('Period:', mail.outbox[0].body)
+        self.assertIn(' to ', mail.outbox[0].body)
+        self.assertIn('Period', mail.outbox[0].alternatives[0][0])
 
 
 class BudgetSerializerTests(TestCase):
@@ -269,6 +270,179 @@ class BudgetPermissionTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(Budget.objects.filter(id=self.budget.id).exists())
+
+    def test_legacy_budget_with_null_dates_loads_with_effective_range(self):
+        Budget.objects.filter(pk=self.budget.pk).update(start_date=None, end_date=None)
+        self._auth(self.owner)
+
+        response = self.client.get(
+            '/api/budgets/',
+            HTTP_X_ORGANIZATION_ID=str(self.organization.id),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        row = response.data['results'][0]
+        self.assertIsNotNone(row['start_date'])
+        self.assertIsNotNone(row['end_date'])
+
+    def test_summary_handles_legacy_budget_with_null_end_date(self):
+        Budget.objects.filter(pk=self.budget.pk).update(end_date=None)
+        self._auth(self.owner)
+
+        response = self.client.get(
+            '/api/budgets/summary/',
+            HTTP_X_ORGANIZATION_ID=str(self.organization.id),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['total_budgets'], 1)
+
+
+class BudgetOverlapRulesTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(
+            username='overlapowner',
+            email='overlap@example.com',
+            password='pass12345',
+        )
+        self.organization = Organization.objects.create(name='Overlap Org')
+        OrganizationMember.objects.create(
+            organization=self.organization,
+            user=self.owner,
+            role='OWNER',
+        )
+        self.owner.active_organization = self.organization
+        self.owner.save(update_fields=['active_organization'])
+        self.client.force_authenticate(self.owner)
+        self.food_budget = Budget.objects.create(
+            organization=self.organization,
+            created_by=self.owner,
+            name='June Food',
+            amount=Decimal('1000.00'),
+            period='MONTHLY',
+            category='FOOD',
+            start_date=timezone.datetime(2027, 6, 1).date(),
+            end_date=timezone.datetime(2027, 6, 30).date(),
+        )
+
+    def post_budget(self, **overrides):
+        payload = {
+            'name': 'Budget',
+            'amount': '500.00',
+            'period': 'MONTHLY',
+            'category': 'FOOD',
+            'alert_threshold': 80,
+            'start_date': '2027-06-15',
+        }
+        payload.update(overrides)
+        return self.client.post(
+            '/api/budgets/',
+            payload,
+            format='json',
+            HTTP_X_ORGANIZATION_ID=str(self.organization.id),
+        )
+
+    def test_same_category_overlapping_active_budget_is_rejected(self):
+        response = self.post_budget()
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn(
+            'An active budget for this category already exists in the selected date range.',
+            str(response.data),
+        )
+
+    def test_same_category_non_overlapping_budget_is_allowed(self):
+        response = self.post_budget(start_date='2027-07-01')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_different_category_and_all_can_share_the_same_period(self):
+        transport = self.post_budget(category='TRANSPORT', name='Transport')
+        overall = self.post_budget(category='ALL', name='Overall')
+
+        self.assertEqual(transport.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(overall.status_code, status.HTTP_201_CREATED)
+
+    def test_update_that_creates_overlap_is_rejected(self):
+        july = Budget.objects.create(
+            organization=self.organization,
+            created_by=self.owner,
+            name='July Food',
+            amount=Decimal('600.00'),
+            period='MONTHLY',
+            category='FOOD',
+            start_date=timezone.datetime(2027, 7, 1).date(),
+            end_date=timezone.datetime(2027, 7, 31).date(),
+        )
+
+        response = self.client.patch(
+            f'/api/budgets/{july.id}/',
+            {'start_date': '2027-06-15'},
+            format='json',
+            HTTP_X_ORGANIZATION_ID=str(self.organization.id),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_reactivating_overlapping_paused_budget_is_rejected(self):
+        paused = Budget.objects.create(
+            organization=self.organization,
+            created_by=self.owner,
+            name='Paused June Food',
+            amount=Decimal('700.00'),
+            period='MONTHLY',
+            category='FOOD',
+            start_date=timezone.datetime(2027, 6, 1).date(),
+            end_date=timezone.datetime(2027, 6, 30).date(),
+            is_active=False,
+        )
+
+        response = self.client.patch(
+            f'/api/budgets/{paused.id}/',
+            {'is_active': True},
+            format='json',
+            HTTP_X_ORGANIZATION_ID=str(self.organization.id),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_monthly_start_date_derives_end_date(self):
+        response = self.post_budget(
+            category='TRAVEL',
+            name='June Travel',
+            start_date='2027-06-01',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['end_date'], '2027-06-30')
+
+    def test_summary_counts_approved_spend_once_with_all_and_category_budgets(self):
+        from expenses.models import Expense
+
+        overall = self.post_budget(
+            category='ALL',
+            name='Overall June',
+            start_date='2027-06-01',
+        )
+        self.assertEqual(overall.status_code, status.HTTP_201_CREATED)
+        Expense.objects.create(
+            organization=self.organization,
+            user=self.owner,
+            title='Approved meal',
+            amount=Decimal('100.00'),
+            category='FOOD',
+            date=timezone.datetime(2027, 6, 10).date(),
+            status='APPROVED',
+        )
+
+        response = self.client.get(
+            '/api/budgets/summary/',
+            HTTP_X_ORGANIZATION_ID=str(self.organization.id),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['total_spent'], 100.0)
 
 
 class BudgetUsageTests(TestCase):

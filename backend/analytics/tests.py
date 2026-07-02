@@ -338,6 +338,70 @@ class AnalyticsEndpointTestCase(TestCase):
         self.assertEqual(bad_period.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(bad_range.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_export_pdf_requires_authentication(self):
+        response = self.client.get('/api/analytics/export-pdf/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_export_pdf_returns_downloadable_pdf(self):
+        self.authenticate(self.owner)
+
+        response = self.client.get('/api/analytics/export-pdf/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertIn('Vyapar_Margadarshan_Report_', response['Content-Disposition'])
+        self.assertTrue(response.content.startswith(b'%PDF'))
+
+    def test_export_pdf_uses_active_workspace_and_approved_only(self):
+        Expense.objects.create(
+            organization=self.organization,
+            user=self.staff,
+            title='Pending PDF expense',
+            amount=Decimal('999.00'),
+            category='OTHER',
+            date=date.today(),
+            status='PENDING',
+        )
+        Expense.objects.create(
+            organization=self.organization,
+            user=self.staff,
+            title='Rejected PDF expense',
+            amount=Decimal('888.00'),
+            category='OTHER',
+            date=date.today(),
+            status='REJECTED',
+        )
+        self.authenticate(self.owner)
+
+        with patch('analytics.views.build_expense_report_pdf', return_value=b'%PDF-mock') as build_pdf:
+            response = self.client.get('/api/analytics/export-pdf/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        queryset = build_pdf.call_args.kwargs['expenses']
+        titles = set(queryset.values_list('title', flat=True))
+        self.assertEqual(titles, {'Owner lunch', 'Staff taxi'})
+        self.assertNotIn('Other org expense', titles)
+        self.assertNotIn('Pending PDF expense', titles)
+        self.assertNotIn('Rejected PDF expense', titles)
+
+    def test_export_pdf_applies_report_filters(self):
+        today = date.today().isoformat()
+        self.authenticate(self.owner)
+
+        with patch('analytics.views.build_expense_report_pdf', return_value=b'%PDF-mock') as build_pdf:
+            response = self.client.get(
+                f'/api/analytics/export-pdf/?start_date={today}&end_date={today}'
+                '&category=TRANSPORT&vendor=Taxi&period=daily'
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        call = build_pdf.call_args.kwargs
+        self.assertEqual(list(call['expenses'].values_list('title', flat=True)), ['Staff taxi'])
+        self.assertEqual(call['start_date'], date.today())
+        self.assertEqual(call['end_date'], date.today())
+        self.assertEqual(call['category'], 'TRANSPORT')
+        self.assertEqual(call['vendor'], 'Taxi')
+
     def test_budget_burn_rate_returns_projection_data(self):
         self.authenticate(self.owner)
 
@@ -356,11 +420,11 @@ class AnalyticsEndpointTestCase(TestCase):
         self.authenticate(self.owner)
         provider_summary = {
             'summary': 'Food is the main month-to-date driver.',
-            'highlights': ['Food totals 100.0 this month.'],
-            'risks': ['No major budget risk is visible.'],
+            'insights': ['Food totals 100.0 this month.'],
+            'warnings': ['Food is a concentrated category.'],
             'recommendations': ['Review food vendors before month close.'],
-            'provider': 'nvidia',
-            'model': 'moonshotai/kimi-k2.6',
+            'provider': 'gemini',
+            'model': 'gemini-2.5-flash',
         }
 
         with patch('analytics.views.generate_ai_insight', return_value=provider_summary) as generate:
@@ -369,11 +433,15 @@ class AnalyticsEndpointTestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['generated_by_ai'])
         self.assertEqual(response.data['summary'], provider_summary['summary'])
-        self.assertEqual(response.data['provider'], 'nvidia')
+        self.assertEqual(response.data['provider'], 'gemini')
+        self.assertEqual(response.data['period'], 'this_month')
         self.assertIn('snapshot_metrics', response.data)
         snapshot = generate.call_args.args[0]
         self.assertEqual(snapshot['scope'], 'organization')
+        self.assertEqual(snapshot['expense_count'], 2)
+        self.assertEqual(snapshot['total_approved_amount'], 150.0)
         self.assertIn('top_categories', snapshot)
+        self.assertIn('highest_expenses', snapshot)
 
     def test_ai_insights_falls_back_when_provider_fails(self):
         self.authenticate(self.owner)
@@ -386,6 +454,36 @@ class AnalyticsEndpointTestCase(TestCase):
         self.assertEqual(response.data['provider'], 'fallback')
         self.assertTrue(response.data['summary'])
         self.assertGreaterEqual(len(response.data['recommendations']), 1)
+
+    def test_staff_ai_insights_uses_only_own_approved_expenses(self):
+        self.authenticate(self.staff)
+
+        with patch('analytics.views.generate_ai_insight', side_effect=AIInsightError('provider down')):
+            response = self.client.get('/api/analytics/ai-insights/?period=last_3_months')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['scope'], 'personal')
+        self.assertEqual(response.data['snapshot_metrics']['expense_count'], 1)
+        self.assertEqual(response.data['snapshot_metrics']['total_approved_amount'], 50.0)
+        self.assertNotIn('100.0', response.data['summary'])
+
+    def test_ai_insights_empty_period_skips_provider(self):
+        self.authenticate(self.owner)
+
+        with patch('analytics.views.generate_ai_insight') as generate:
+            response = self.client.get('/api/analytics/ai-insights/?period=last_month')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['enough_data'])
+        self.assertEqual(response.data['insights'], [])
+        generate.assert_not_called()
+
+    def test_ai_insights_rejects_unknown_period(self):
+        self.authenticate(self.owner)
+
+        response = self.client.get('/api/analytics/ai-insights/?period=yearly')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_anomalies_flags_high_amount_and_duplicate_candidates(self):
         today = date.today()

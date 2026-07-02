@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar.jsx';
 import { Topbar } from './Topbar.jsx';
 import { useEffect, useState } from 'react';
@@ -6,6 +6,7 @@ import api from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export function AppShell() {
+  const location = useLocation();
   const { token, organization } = useAuth();
   const [badges, setBadges] = useState({});
   const [loading, setLoading] = useState(true);
@@ -40,12 +41,17 @@ export function AppShell() {
   }, [token, organization?.id]);
 
   return (
-    <div className="min-h-screen flex bg-paper">
+    <div className="flex min-h-screen bg-paper">
       <Sidebar badges={badges} />
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex min-h-screen min-w-0 flex-1 flex-col">
         <Topbar />
-        <main key={organizationId} className="flex-1 min-w-0 pb-20 md:pb-0">
-          <Outlet />
+        <main className="min-h-[calc(100vh-4rem)] min-w-0 flex-1 overflow-x-hidden pb-20 md:pb-0">
+          <div
+            key={`${organizationId}:${location.pathname}`}
+            className="min-h-[calc(100vh-4rem)] min-w-0 animate-route-in"
+          >
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

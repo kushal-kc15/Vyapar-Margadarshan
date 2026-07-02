@@ -13,6 +13,8 @@ from rest_framework.response import Response
 
 from budgets.models import Budget
 from .ai_insights import AIInsightError, generate_ai_insight
+from .rule_advisory import generate_rule_based_advice
+from .pdf_report import build_expense_report_pdf
 from expenses.models import Expense
 from organizations.context import get_active_membership
 
@@ -223,13 +225,20 @@ def budget_bounds(budget):
     return start, end
 
 
-def current_month_bounds():
+def ai_insight_period_bounds(period):
     today = timezone.now().date()
     current_start = today.replace(day=1)
-    current_end = today
-    previous_end = current_start - timedelta(days=1)
-    previous_start = previous_end.replace(day=1)
-    return current_start, current_end, previous_start, previous_end
+    if period == 'this_month':
+        return current_start, today
+    if period == 'last_month':
+        end = current_start - timedelta(days=1)
+        return end.replace(day=1), end
+    if period == 'last_3_months':
+        month = current_start
+        for _ in range(2):
+            month = (month - timedelta(days=1)).replace(day=1)
+        return month, today
+    raise ValidationError({'period': 'Use this_month, last_month, or last_3_months.'})
 
 
 def period_change(current_total, previous_total):
@@ -292,140 +301,72 @@ def top_vendor_rows(queryset, limit=5):
     ]
 
 
-def budget_risk_rows(member, limit=5):
-    today = timezone.now().date()
-    budgets = Budget.objects.filter(
-        organization=member.organization,
-        is_active=True,
-    ).order_by('category', 'name')
-
-    risks = []
-    for budget in budgets:
-        start, end = budget_bounds(budget)
-        expense_filter = {
-            'organization': member.organization,
-            'status': 'APPROVED',
-            'date__gte': start,
-            'date__lte': end,
-        }
-        if budget.category != 'ALL':
-            expense_filter['category'] = budget.category
-        spent = Expense.objects.filter(**expense_filter).aggregate(total=Sum('amount'))['total'] or Decimal('0')
-        days_total = max((end - start).days + 1, 1)
-        elapsed_end = min(max(today, start), end)
-        days_elapsed = max((elapsed_end - start).days + 1, 1)
-        projected_spend = (spent / Decimal(days_elapsed)) * Decimal(days_total)
-        projected_percentage = percent(projected_spend, budget.amount, precision=1)
-
-        if spent > budget.amount or projected_percentage >= 80:
-            risks.append({
-                'budget_id': budget.id,
-                'name': budget.name,
-                'category': budget.category,
-                'budget_amount': money(budget.amount),
-                'spent_amount': money(spent),
-                'projected_spend': money(projected_spend),
-                'projected_percentage_used': projected_percentage,
-                'is_over_budget': spent > budget.amount,
-            })
-
-    risks.sort(key=lambda row: (row['is_over_budget'], row['projected_percentage_used']), reverse=True)
-    return risks[:limit]
-
-
-def anomaly_rows_for_insights(request, limit=5):
-    expenses, member = scoped_anomaly_expenses(request)
-    today = timezone.now().date()
-    base_queryset = expenses.filter(date__gte=today - timedelta(days=180), date__lte=today)
-    candidates = base_queryset.order_by('-date', '-created_at')[:limit * 4]
-    rows = []
-    for expense in candidates:
-        anomaly = detect_expense_anomalies(
-            expense,
-            base_queryset,
-            amount_multiplier=Decimal('2.5'),
-            minimum_baseline_count=3,
-            duplicate_window_days=3,
-        )
-        if anomaly:
-            rows.append({
-                'expense_id': anomaly['expense_id'],
-                'title': anomaly['title'],
-                'amount': anomaly['amount'],
-                'category': anomaly['category'],
-                'vendor': anomaly['vendor'],
-                'severity': anomaly['severity'],
-                'score': anomaly['score'],
-                'reason_codes': [reason['code'] for reason in anomaly['reasons']],
-            })
-    rows.sort(key=lambda item: item['score'], reverse=True)
-    return rows[:limit], member
-
-
 def build_ai_insight_snapshot(request):
     base_expenses, member = scoped_expenses(request)
-    current_start, current_end, previous_start, previous_end = current_month_bounds()
-    current_expenses = base_expenses.filter(date__gte=current_start, date__lte=current_end)
-    previous_expenses = base_expenses.filter(date__gte=previous_start, date__lte=previous_end)
-    current_summary = summarize_queryset(current_expenses)
-    previous_summary = summarize_queryset(previous_expenses)
-    anomalies_summary, _ = anomaly_rows_for_insights(request)
+    period = (
+        request.data.get('period', 'this_month')
+        if request.method == 'POST'
+        else request.query_params.get('period', 'this_month')
+    )
+    start_date, end_date = ai_insight_period_bounds(period)
+    expenses = base_expenses.filter(date__gte=start_date, date__lte=end_date)
+    summary = summarize_queryset(expenses)
+    highest_expenses = [
+        {
+            'title': expense.title,
+            'amount': money(expense.amount),
+            'category': expense.category,
+            'vendor': expense.vendor or '',
+            'date': expense.date,
+        }
+        for expense in expenses.order_by('-amount', '-date')[:5]
+    ]
 
     return {
         'organization_id': member.organization_id,
         'scope': 'organization' if member.role == 'OWNER' else 'personal',
-        'period': {
-            'type': 'month_to_date',
-            'current_start': current_start,
-            'current_end': current_end,
-            'previous_start': previous_start,
-            'previous_end': previous_end,
-        },
-        'current_period': current_summary,
-        'previous_period': previous_summary,
-        'change_percentage': period_change(current_summary['total'], previous_summary['total']),
-        'top_categories': top_category_rows(current_expenses, limit=5),
-        'top_vendors': top_vendor_rows(current_expenses, limit=5),
-        'budget_risks': budget_risk_rows(member, limit=5),
-        'anomalies': anomalies_summary,
+        'period': period,
+        'start_date': start_date,
+        'end_date': end_date,
+        'total_approved_amount': summary['total'],
+        'expense_count': summary['count'],
+        'top_categories': top_category_rows(expenses, limit=5),
+        'top_vendors': top_vendor_rows(expenses, limit=5),
+        'highest_expenses': highest_expenses,
     }
 
 
 def fallback_ai_insight(snapshot):
     top_category = snapshot['top_categories'][0] if snapshot['top_categories'] else None
     top_vendor = snapshot['top_vendors'][0] if snapshot['top_vendors'] else None
-    risk_count = len(snapshot['budget_risks']) + len(snapshot['anomalies'])
     summary = (
-        f"Month-to-date spend is {snapshot['current_period']['total']} across "
-        f"{snapshot['current_period']['count']} approved transactions."
+        f"Approved spend for this period is {snapshot['total_approved_amount']} across "
+        f"{snapshot['expense_count']} expenses."
     )
-    highlights = [
-        f"Spend changed {snapshot['change_percentage']}% versus the previous month-to-date period.",
-    ]
+    insights = []
     if top_category:
-        highlights.append(f"{top_category['category']} is the largest category at {top_category['total']}.")
+        insights.append(f"{top_category['category']} is the largest category at {top_category['total']}.")
     if top_vendor:
-        highlights.append(f"{top_vendor['vendor']} is the top vendor at {top_vendor['total']}.")
+        insights.append(f"{top_vendor['vendor']} is the top vendor at {top_vendor['total']}.")
+    if snapshot['highest_expenses']:
+        highest = snapshot['highest_expenses'][0]
+        insights.append(f"The highest expense is {highest['title']} at {highest['amount']}.")
 
-    risks = []
-    if snapshot['budget_risks']:
-        risks.append(f"{len(snapshot['budget_risks'])} budget areas are projected near or over limit.")
-    if snapshot['anomalies']:
-        risks.append(f"{len(snapshot['anomalies'])} expenses have anomaly signals.")
-    if not risks:
-        risks.append('No major budget or anomaly risks are visible in the current snapshot.')
+    warnings = []
+    if top_category and snapshot['total_approved_amount']:
+        category_share = (top_category['total'] / snapshot['total_approved_amount']) * 100
+        if category_share >= 60:
+            warnings.append(f"{top_category['category']} represents {round(category_share)}% of approved spend.")
 
     recommendations = [
-        'Review the highest category before approving new discretionary spend.',
-        'Check anomaly and budget-risk items before closing the finance cycle.',
+        'Review the highest category before approving new discretionary spending.',
+        'Compare top vendors for consolidation or negotiated pricing opportunities.',
     ]
-    if risk_count == 0:
-        recommendations.append('Keep receipt capture and categorization discipline consistent.')
 
     return {
         'summary': summary,
-        'highlights': highlights[:3],
-        'risks': risks[:3],
+        'insights': insights[:4],
+        'warnings': warnings[:3],
         'recommendations': recommendations[:3],
         'provider': 'fallback',
         'model': '',
@@ -706,6 +647,31 @@ def export_csv(request):
             decimal_string(expense.amount),
         ])
 
+    return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_pdf(request):
+    parse_period(request)  # Keep validation consistent with CSV/report requests.
+    expenses, member = scoped_expenses(request)
+    expenses, start_date, end_date, category, vendor = apply_report_filters(expenses, request)
+    pdf_bytes = build_expense_report_pdf(
+        member=member,
+        user=request.user,
+        expenses=expenses,
+        start_date=start_date,
+        end_date=end_date,
+        category=category,
+        vendor=vendor,
+        category_label=category_label,
+    )
+    filename_start = start_date.isoformat() if start_date else 'all'
+    filename_end = end_date.isoformat() if end_date else 'all'
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = (
+        f'attachment; filename="Vyapar_Margadarshan_Report_{filename_start}_to_{filename_end}.pdf"'
+    )
     return response
 
 
@@ -997,8 +963,51 @@ def report_detail(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def rule_based_advice(request):
+    """Return deterministic advice for the selected approved-spend period."""
+    member = get_member_or_error(request)
+    start_date = parse_date_param(request, 'start_date')
+    end_date = parse_date_param(request, 'end_date')
+    today = timezone.localdate()
+    start_date = start_date or today.replace(day=1)
+    end_date = end_date or today
+    if start_date > end_date:
+        raise ValidationError({'date_range': 'start_date cannot be after end_date.'})
+
+    return Response(generate_rule_based_advice(
+        organization=member.organization,
+        user=request.user,
+        start_date=start_date,
+        end_date=end_date,
+        role=member.role,
+    ))
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
 def ai_insights(request):
     snapshot = build_ai_insight_snapshot(request)
+    if snapshot['expense_count'] == 0:
+        return Response({
+            'organization_id': snapshot['organization_id'],
+            'scope': snapshot['scope'],
+            'period': snapshot['period'],
+            'start_date': snapshot['start_date'],
+            'end_date': snapshot['end_date'],
+            'enough_data': False,
+            'generated_by_ai': False,
+            'summary': '',
+            'insights': [],
+            'warnings': [],
+            'recommendations': [],
+            'provider': 'none',
+            'model': '',
+            'snapshot_metrics': {
+                'total_approved_amount': 0,
+                'expense_count': 0,
+            },
+        })
+
     generated_by_ai = True
     try:
         insight = generate_ai_insight(snapshot)
@@ -1010,19 +1019,19 @@ def ai_insights(request):
         'organization_id': snapshot['organization_id'],
         'scope': snapshot['scope'],
         'period': snapshot['period'],
+        'start_date': snapshot['start_date'],
+        'end_date': snapshot['end_date'],
+        'enough_data': True,
         'generated_by_ai': generated_by_ai,
         'summary': insight['summary'],
-        'highlights': insight['highlights'],
-        'risks': insight['risks'],
+        'insights': insight['insights'],
+        'warnings': insight['warnings'],
         'recommendations': insight['recommendations'],
         'provider': insight['provider'],
         'model': insight['model'],
         'snapshot_metrics': {
-            'current_period': snapshot['current_period'],
-            'previous_period': snapshot['previous_period'],
-            'change_percentage': snapshot['change_percentage'],
-            'budget_risk_count': len(snapshot['budget_risks']),
-            'anomaly_count': len(snapshot['anomalies']),
+            'total_approved_amount': snapshot['total_approved_amount'],
+            'expense_count': snapshot['expense_count'],
         },
     })
 
@@ -1047,7 +1056,8 @@ def anomalies(request):
     today = timezone.now().date()
     cutoff = today - timedelta(days=lookback_days)
     base_queryset = expenses.filter(date__gte=cutoff, date__lte=today)
-    candidates = base_queryset.order_by('-date', '-created_at')[:limit * 3]
+    candidate_queryset, start_date, end_date = apply_date_filters(base_queryset, request)
+    candidates = candidate_queryset.order_by('-date', '-created_at')[:limit * 3]
 
     flagged = []
     for expense in candidates:
@@ -1067,6 +1077,8 @@ def anomalies(request):
         'organization_id': member.organization_id,
         'scope': 'organization' if member.role == 'OWNER' else 'personal',
         'lookback_days': lookback_days,
+        'start_date': start_date,
+        'end_date': end_date,
         'rules': [
             'HIGH_CATEGORY_AMOUNT',
             'HIGH_VENDOR_AMOUNT',

@@ -8,12 +8,14 @@ from django.db.models import Sum, Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta
+
 from .models import Expense
 from .serializers import ExpenseSerializer
 from activity_logs.utils import log_activity
 from notifications.utils import notify_expense_approved, notify_expense_rejected, notify_pending_approval
 from organizations.context import get_active_membership
 from organizations.models import OrganizationMember
+from analytics.anomaly_notifications import notify_owners_if_expense_is_unusual
 
 
 class ExpenseViewSet(viewsets.ModelViewSet):
@@ -138,6 +140,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                 role='OWNER'
             )
             notify_pending_approval(owners, expense)
+            notify_owners_if_expense_is_unusual(expense)
         else:
             # Owner expenses are auto-approved
             if member:
@@ -167,8 +170,8 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         
         # Find active budgets for this category and organization
         budgets = Budget.objects.filter(
+            Q(category=expense.category) | Q(category='ALL'),
             organization=expense.organization,
-            category=expense.category,
             is_active=True,
             start_date__lte=expense.date,
             end_date__gte=expense.date
@@ -276,6 +279,24 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         last_week_total = float(last_week_expenses['total'] or 0)
         month_total = float(month_expenses['total'] or 0)
         last_month_total = float(last_month_expenses['total'] or 0)
+
+        daily_rows = Expense.objects.filter(
+            base_filter,
+            date__gte=month_start,
+            date__lte=today,
+        ).values('date').annotate(total=Sum('amount')).order_by('date')
+        daily_totals = {
+            row['date']: float(row['total'] or 0)
+            for row in daily_rows
+        }
+        daily_trend = []
+        trend_date = month_start
+        while trend_date <= today:
+            daily_trend.append({
+                'date': trend_date,
+                'amount': daily_totals.get(trend_date, 0),
+            })
+            trend_date += timedelta(days=1)
         
         return Response({
             'today': {
@@ -291,8 +312,14 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             'month': {
                 'total': month_total,
                 'count': month_expenses['count'] or 0,
-                'growth': calculate_growth(month_total, last_month_total)
-            }
+                'previous_total': last_month_total,
+                'growth': (
+                    calculate_growth(month_total, last_month_total)
+                    if last_month_total > 0
+                    else None
+                ),
+            },
+            'daily_trend': daily_trend,
         })
     
     @action(detail=False, methods=['get'])
@@ -413,10 +440,12 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             if approving:
                 self.check_budgets_for_expense(expense)
                 notify_expense_approved(expense, user)
+
                 metadata = {'expense_id': expense.id, 'approved_by': user.id}
                 action_type = 'EXPENSE_APPROVED'
             else:
                 notify_expense_rejected(expense, user, expense.rejection_reason)
+
                 metadata = {
                     'expense_id': expense.id,
                     'rejected_by': user.id,

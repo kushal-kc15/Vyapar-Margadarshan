@@ -2,16 +2,33 @@ import { useEffect, useRef, useState } from 'react';
 import { LogOut, Settings as SettingsIcon, User as UserIcon, ChevronDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useNavigate } from 'react-router-dom';
-import api from '../lib/api.js';
 import { Avatar } from './Avatar.jsx';
 import { cn } from '../lib/utils.js';
 import Badge from './Badge.jsx';
+
+const userDisplayName = (user) => {
+  const fullName = String(user?.full_name ?? '').trim();
+  if (fullName) return fullName;
+
+  const combinedName = [user?.first_name, user?.last_name]
+    .map((part) => String(part ?? '').trim())
+    .filter(Boolean)
+    .join(' ');
+  if (combinedName) return combinedName;
+
+  const username = String(user?.username ?? '').trim();
+  if (username) return username;
+
+  const emailLocalPart = String(user?.email ?? '').split('@')[0].trim();
+  return emailLocalPart || 'Account';
+};
 
 export function UserMenu() {
   const { user, logout, role } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const navigate = useNavigate();
+  const displayName = userDisplayName(user);
 
   useEffect(() => {
     const onClick = (e) => {
@@ -35,16 +52,16 @@ export function UserMenu() {
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <Avatar name={user?.full_name ?? user?.email ?? '?'} size={24} />
+        <Avatar name={displayName} size={24} />
         <span className="hidden sm:inline max-w-[140px] truncate font-medium text-ink">
-          {user?.full_name ?? user?.email ?? 'Account'}
+          {displayName}
         </span>
         <ChevronDown size={14} className={cn('text-ink-muted transition-transform duration-200', open && 'rotate-180')} strokeWidth={1.5} />
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1 z-50 w-64 max-w-[calc(100vw-1.5rem)] bg-paper border border-rule rounded-md shadow-lift overflow-hidden animate-drawer origin-top-right">
           <div className="px-3 py-2.5 border-b border-rule">
-            <p className="text-sm font-medium text-ink truncate">{user?.full_name ?? '—'}</p>
+            <p className="text-sm font-medium text-ink truncate">{displayName}</p>
             <p className="text-xs text-ink-muted truncate">{user?.email}</p>
             {role && (
               <Badge tone="cinnabar" className="mt-1.5 text-[10px] px-2 py-0.5">

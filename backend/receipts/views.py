@@ -4,7 +4,11 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 from organizations.context import get_active_membership
+from organizations.models import OrganizationMember
+from notifications.utils import notify_pending_approval
+from analytics.anomaly_notifications import notify_owners_if_expense_is_unusual
 from .models import Receipt
 from .serializers import ReceiptSerializer, ReceiptUploadSerializer, ReceiptVerifySerializer
 from .tasks import (
@@ -218,7 +222,7 @@ class ReceiptViewSet(viewsets.ModelViewSet):
                 'amount': request.data.get('amount', receipt.total_amount),
                 'category': request.data.get('category', receipt.category or 'OTHER'),
                 'vendor': request.data.get('vendor', receipt.vendor_name),
-                'date': request.data.get('date', receipt.receipt_date),
+                'date': request.data.get('date') or timezone.localdate(),
                 'description': request.data.get('description', receipt.description or 'Created from AI receipt scan'),
             }
 
@@ -233,6 +237,20 @@ class ReceiptViewSet(viewsets.ModelViewSet):
                 user=user,
                 status=expense_status,
             )
+
+            if expense_status == 'APPROVED':
+                # Keep receipt-created expenses consistent with normal expense
+                # creation: approved spend immediately re-evaluates matching
+                # category and all-category budgets.
+                from expenses.views import ExpenseViewSet
+                ExpenseViewSet().check_budgets_for_expense(expense)
+            else:
+                owners = OrganizationMember.objects.filter(
+                    organization=organization,
+                    role='OWNER',
+                ).select_related('user')
+                notify_pending_approval(owners, expense)
+                notify_owners_if_expense_is_unusual(expense)
             
             # Link receipt to expense
             receipt.expense = expense

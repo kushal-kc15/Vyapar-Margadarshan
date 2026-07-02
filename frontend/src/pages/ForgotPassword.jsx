@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Loader2 } from 'lucide-react';
-import Logo from '../components/Logo.jsx';
+import AuthLayout from '../components/AuthLayout.jsx';
 import Button from '../components/Button.jsx';
 import { Input } from '../components/Field.jsx';
 import api from '../lib/api.js';
@@ -39,18 +39,14 @@ export default function ForgotPassword() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-paper">
-      <header className="px-4 py-5 sm:px-10 flex flex-wrap items-center justify-between gap-3">
-        <Link to="/">
-          <Logo size={28} withWordmark wordmarkSize="lg" />
-        </Link>
+    <AuthLayout
+      headerAction={
         <Link to="/login" className="text-sm text-ink-soft hover:text-ink transition-colors">
           Back to sign in
         </Link>
-      </header>
-
-      <main className="flex-1 flex items-center justify-center px-4 py-8 sm:px-6">
-        <div className="w-full max-w-sm text-center">
+      }
+    >
+        <div className="w-full text-center">
           <h1 className="font-display text-3xl sm:text-4xl font-medium text-ink leading-tight tracking-tight">
             {done ? 'Check your inbox' : 'Reset your password'}
           </h1>
@@ -101,7 +97,6 @@ export default function ForgotPassword() {
             </div>
           )}
         </div>
-      </main>
-    </div>
+    </AuthLayout>
   );
 }

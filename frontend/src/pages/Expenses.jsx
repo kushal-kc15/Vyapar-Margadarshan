@@ -181,6 +181,18 @@ export default function Expenses() {
     setRefreshKey((key) => key + 1);
   };
 
+  const handleOcrCreated = useCallback(() => {
+    setPage(1);
+    setRefreshKey((key) => key + 1);
+    if (status === "") {
+      toast.success("Expense created from receipt scan.");
+    } else {
+      toast.success(
+        "Expense created from receipt scan. Showing page 1; change filters if you do not see it.",
+      );
+    }
+  }, [status, toast]);
+
   const pageActions = useMemo(
     () => (
       <>
@@ -224,13 +236,13 @@ export default function Expenses() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 pt-2 pb-4 sm:px-6 sm:pt-2 sm:pb-5 lg:px-10">
+    <div className="mx-auto w-full max-w-7xl px-4 pb-6 pt-2 sm:px-6 lg:px-8">
       <div className="mb-2 flex flex-wrap items-center justify-end gap-1.5 border-b border-rule pb-2" aria-label="Expense actions">
         {pageActions}
       </div>
 
       <section
-        className="border-y border-rule bg-paper-deep/30"
+        className="rounded-md border border-rule bg-paper-deep/50"
         aria-label="Expense filters"
       >
         <div className="flex flex-col gap-2 px-3 py-2 sm:px-4">
@@ -324,10 +336,10 @@ export default function Expenses() {
         </div>
       </section>
 
-      <Panel className="mt-2">
-        <div className="flex items-center justify-between border-b border-rule px-4 py-2 sm:px-5">
+      <Panel className="mt-3 overflow-hidden">
+        <div className="flex items-center justify-between border-b border-rule px-4 py-3 sm:px-5">
           <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-            <h2 className="font-display text-sm font-medium text-ink">
+            <h2 className="font-display text-sm font-semibold text-ink">
               Expense ledger
             </h2>
             <span className="text-xs text-ink-muted hidden sm:inline">-</span>
@@ -391,10 +403,11 @@ export default function Expenses() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-micro uppercase tracking-eyebrow text-ink-muted border-b border-rule">
-                    <th className="py-2.5 pl-5 font-medium">Date</th>
-                    <th className="py-2.5 font-medium">Expense</th>
-                    <th className="py-2.5 font-medium">Status</th>
-                    <th className="py-2.5 pr-5 font-medium text-right">
+                    <th className="py-2.5 pl-5 font-semibold">Date</th>
+                    <th className="py-2.5 font-semibold">Expense</th>
+                    <th className="py-2.5 font-semibold">Category</th>
+                    <th className="py-2.5 font-semibold">Status</th>
+                    <th className="py-2.5 pr-5 font-semibold text-right">
                       Amount
                     </th>
                   </tr>
@@ -404,15 +417,15 @@ export default function Expenses() {
                     <tr
                       key={expense.id}
                       onClick={() => setDetail(expense)}
-                      className="cursor-pointer hover:bg-paper-deep/40 transition-colors"
+                      className="cursor-pointer transition-colors hover:bg-paper-deep/50"
                     >
-                      <td className="py-2.5 pl-5 text-ink-soft text-xs whitespace-nowrap w-28">
+                      <td className="w-28 whitespace-nowrap py-3 pl-5 text-xs text-ink-soft">
                         {formatDate(
                           expense.date ?? expense.created_at,
                           "short",
                         )}
                       </td>
-                      <td className="py-2.5 min-w-0">
+                      <td className="min-w-0 py-3 pr-4">
                         <div className="flex min-w-0 items-center gap-1.5">
                           <p className="min-w-0 truncate font-medium text-ink">
                             {expense.title ?? expense.description ?? "-"}
@@ -431,14 +444,19 @@ export default function Expenses() {
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-ink-muted truncate">
-                          {expense.vendor || "No vendor"}
+                        <p className="truncate text-[11px] text-ink-muted">
+                          {[expense.vendor || "No vendor", expense.description, personName(expense)]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </p>
                       </td>
-                      <td className="py-2.5">
+                      <td className="py-3 pr-4 text-xs text-ink-soft">
+                        {categoryLabel(expense.category)}
+                      </td>
+                      <td className="py-3 pr-4">
                         <StatusPill status={expense.status} />
                       </td>
-                      <td className="py-2.5 pr-5 num text-right text-ink whitespace-nowrap">
+                      <td className="whitespace-nowrap py-3 pr-5 text-right font-medium text-ink tabular-nums">
                         <Money
                           value={expense.amount}
                           currency={expense.currency ?? currency}
@@ -479,7 +497,7 @@ export default function Expenses() {
                         )}
                       </div>
                       <p className="mt-0.5 truncate text-xs text-ink-muted">
-                        {expense.vendor || "No vendor"}
+                        {expense.vendor || "No vendor"} · {categoryLabel(expense.category)}
                       </p>
                       <p className="mt-1 text-xs text-ink-muted">
                         {formatDate(
@@ -541,7 +559,7 @@ export default function Expenses() {
           role={role}
           onClose={closeModal}
           onSaved={onSaved}
-          onCreated={() => setRefreshKey((key) => key + 1)}
+          onCreated={handleOcrCreated}
         />
       )}
 
@@ -574,17 +592,7 @@ export default function Expenses() {
       <OCRReceiptModal
         open={ocrOpen}
         onClose={() => setOcrOpen(false)}
-        onCreated={() => {
-          setPage(1);
-          setRefreshKey((key) => key + 1);
-          if (status === "") {
-            toast.success("Expense created from receipt scan.");
-          } else {
-            toast.success(
-              "Expense created from receipt scan. Showing page 1; change filters if you do not see it.",
-            );
-          }
-        }}
+        onCreated={handleOcrCreated}
       />
     </div>
   );

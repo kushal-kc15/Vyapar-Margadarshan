@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Edit3, FileText, Plus, Receipt, RefreshCw, Search, XCircle } from 'lucide-react';
+import { CheckCircle2, Edit3, FileText, Plus, Receipt, RefreshCw, Search, Trash2, XCircle } from 'lucide-react';
 import api from '../lib/api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Panel, PanelHeader, PanelTitle } from '../components/Panel.jsx';
@@ -18,6 +18,8 @@ const VERB_ICON = {
   approved: CheckCircle2,
   rejected: XCircle,
   updated: Edit3,
+  deleted: Trash2,
+  removed: Trash2,
   paid: CheckCircle2,
   reimbursed: CheckCircle2,
 };
@@ -27,25 +29,27 @@ const normalizeVerb = (row) => {
   if (!action) return 'created';
   return String(action).toLowerCase();
 };
-const actorName = (row) => (
-  row?.user_name ??
-  row?.user_email ??
-  row?.actor_name ??
-  row?.actor?.username ??
-  row?.user?.username ??
-  'Someone'
-);
+const actionKind = (verb) => verb.split('_').filter(Boolean).at(-1) ?? verb;
+const actorName = (row) => [
+  row?.user_name,
+  row?.actor_name,
+  row?.actor?.username,
+  row?.user?.username,
+  row?.user_email,
+].find((value) => String(value ?? '').trim()) ?? 'System user';
+const actorEmail = (row) => row?.user_email ?? row?.actor?.email ?? row?.user?.email ?? '';
 const objectText = (row) => row?.description ?? row?.object_repr ?? row?.target ?? 'an expense';
 const eventTime = (row) => row?.timestamp ?? row?.created_at ?? row?.date ?? null;
-const metadataText = (row) => {
+const metadataItems = (row) => {
   const metadata = row?.metadata;
-  if (!metadata || typeof metadata !== 'object') return '';
+  if (!metadata || typeof metadata !== 'object') return [];
   const details = [];
   if (metadata.expense_id != null) details.push(`Expense #${metadata.expense_id}`);
-  if (metadata.status) details.push(`Status: ${metadata.status}`);
-  if (metadata.approved_by != null) details.push(`Approved by #${metadata.approved_by}`);
-  if (metadata.rejected_by != null) details.push(`Rejected by #${metadata.rejected_by}`);
-  return details.join(' - ');
+  if (metadata.budget_id != null) details.push(`Budget #${metadata.budget_id}`);
+  if (metadata.member_id != null) details.push(`Member #${metadata.member_id}`);
+  if (metadata.status) details.push(`Status: ${readableVerb(String(metadata.status).toLowerCase())}`);
+  if (metadata.role) details.push(`Role: ${readableVerb(String(metadata.role).toLowerCase())}`);
+  return details;
 };
 
 const readableVerb = (verb) => {
@@ -55,9 +59,10 @@ const readableVerb = (verb) => {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 };
 
-const eventTone = (verb) => {
-  if (verb === 'approved' || verb === 'paid' || verb === 'reimbursed') return 'moss';
-  if (verb === 'rejected') return 'cinnabar';
+const eventTone = (kind) => {
+  if (kind === 'approved' || kind === 'paid' || kind === 'reimbursed') return 'moss';
+  if (kind === 'rejected' || kind === 'deleted' || kind === 'removed') return 'cinnabar';
+  if (kind === 'created' || kind === 'updated' || kind === 'joined' || kind === 'invited') return 'forest';
   return 'ink';
 };
 
@@ -96,14 +101,17 @@ export default function Activity() {
   const normalizedRows = useMemo(
     () => rows.map((row, index) => {
       const verb = normalizeVerb(row);
+      const kind = actionKind(verb);
       return {
         key: row?.id ?? `${verb}-${index}`,
         row,
         verb,
+        kind,
         actionLabel: readableVerb(verb),
         actor: actorName(row),
+        actorEmail: actorEmail(row),
         object: objectText(row),
-        metadata: metadataText(row),
+        metadata: metadataItems(row),
         timestamp: eventTime(row),
         amount: row?.amount,
         currency: row?.currency ?? currency,
@@ -121,7 +129,7 @@ export default function Activity() {
     const needle = q.trim().toLowerCase();
     return normalizedRows.filter((event) => {
       const matchesVerb = !verbFilter || event.verb === verbFilter;
-      const haystack = `${event.actor} ${event.verb} ${event.actionLabel} ${event.object} ${event.row?.description ?? ''}`.toLowerCase();
+      const haystack = `${event.actor} ${event.actorEmail} ${event.verb} ${event.actionLabel} ${event.object} ${event.row?.description ?? ''}`.toLowerCase();
       const matchesSearch = !needle || haystack.includes(needle);
       return matchesVerb && matchesSearch;
     });
@@ -166,15 +174,14 @@ export default function Activity() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-3 sm:px-6 sm:py-4 lg:px-10">
+    <div className="mx-auto w-full max-w-7xl px-4 pb-6 pt-2 sm:px-6 lg:px-8">
       <div className="mb-2 flex flex-wrap items-center justify-end gap-1.5 border-b border-rule pb-2" aria-label="Activity actions">
         {pageActions}
       </div>
 
       {!loading && !loadError && normalizedRows.length > 0 && (
-        <section className="border-t border-rule pt-3" aria-label="Activity summary">
-          <p className="text-sm font-medium text-ink">Summary</p>
-          <div className="mt-2.5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="pt-2" aria-label="Activity summary">
+          <div className="grid grid-cols-2 overflow-hidden rounded-md border border-rule bg-paper lg:grid-cols-4">
             <SummaryMetric label="Shown" value={filteredRows.length} helper={`${normalizedRows.length} loaded`} />
             <SummaryMetric label="Common action" value={mostCommonAction} />
             <SummaryMetric label="Latest" value={latestTimestamp ? formatDate(latestTimestamp, 'relative') : 'Unavailable'} />
@@ -183,8 +190,8 @@ export default function Activity() {
         </section>
       )}
 
-      <section className="mt-3 border-y border-rule py-2.5" aria-label="Activity filters">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
+      <section className="mt-3 rounded-md border border-rule bg-paper-deep/60 px-3 py-2.5" aria-label="Activity filters">
+        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-12 md:items-end">
           <div className="md:col-span-6">
             <label className="field-label" htmlFor="activity-search">Search activity</label>
             <div className="relative">
@@ -206,7 +213,7 @@ export default function Activity() {
             </Select>
           </div>
           <div className="md:col-span-3 flex items-end justify-between gap-3">
-            <p className="pb-2 text-xs text-ink-muted">{filteredRows.length} shown</p>
+            <p className="pb-2 text-xs font-medium text-ink-muted">{filteredRows.length} shown</p>
             {hasFilters && (
               <Button variant="ghost" size="sm" onClick={clearFilters}>Clear</Button>
             )}
@@ -214,9 +221,12 @@ export default function Activity() {
         </div>
       </section>
 
-      <Panel className="mt-3">
-        <PanelHeader>
-          <PanelTitle>Activity</PanelTitle>
+      <Panel className="mt-3 overflow-hidden">
+        <PanelHeader className="!py-3">
+          <div>
+            <PanelTitle>Audit trail</PanelTitle>
+            <p className="mt-0.5 text-xs text-ink-muted">Workspace actions in newest-first order.</p>
+          </div>
         </PanelHeader>
         {loading ? (
           <div className="py-10 flex flex-col items-center justify-center gap-3 text-sm text-ink-muted">
@@ -242,7 +252,7 @@ export default function Activity() {
           />
         ) : (
           <>
-            <ol className="relative md:before:absolute md:before:left-9 md:before:top-4 md:before:bottom-4 md:before:w-px md:before:bg-rule">
+            <ol className="relative divide-y divide-rule md:before:absolute md:before:bottom-5 md:before:left-9 md:before:top-5 md:before:w-px md:before:bg-rule">
               {pagedFilteredRows.map((event) => (
                 <ActivityItem key={event.key} event={event} />
               ))}
@@ -262,37 +272,53 @@ export default function Activity() {
 }
 
 function ActivityItem({ event }) {
-  const Icon = VERB_ICON[event.verb] ?? Receipt;
-  const tone = eventTone(event.verb);
+  const Icon = VERB_ICON[event.kind] ?? Receipt;
+  const tone = eventTone(event.kind);
   const toneClass = tone === 'moss'
-    ? 'text-moss-700 bg-moss-50'
+    ? 'border-moss-200 bg-moss-50 text-moss-700'
     : tone === 'cinnabar'
-      ? 'text-cinnabar-700 bg-cinnabar-50'
-      : 'text-ink-soft bg-paper-deep';
+      ? 'border-cinnabar-200 bg-cinnabar-50 text-cinnabar-700'
+      : tone === 'forest'
+        ? 'border-forest-200 bg-forest-50 text-forest-700'
+        : 'border-rule bg-paper-deep text-ink-soft';
 
   return (
-    <li className="relative px-4 py-3.5 md:pl-16 md:pr-5">
-      <span className={cn('mb-3 flex h-8 w-8 items-center justify-center rounded-pill md:absolute md:left-5 md:top-3.5', toneClass)}>
+    <li className="relative px-4 py-3.5 transition-colors hover:bg-paper-deep/35 md:pl-16 md:pr-5">
+      <span className={cn('mb-3 flex h-8 w-8 items-center justify-center rounded-pill border md:absolute md:left-5 md:top-3.5', toneClass)}>
         <Icon size={14} strokeWidth={1.5} aria-hidden="true" />
       </span>
-      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <Avatar name={event.actor} size={22} />
-            <span className="min-w-0 break-words text-sm font-medium text-ink">{event.actor}</span>
-            <span className="rounded-sm bg-paper-deep px-1.5 py-0.5 text-[11px] text-ink-muted">{event.actionLabel}</span>
+            <span className="min-w-0 break-words text-sm font-semibold text-ink">{event.actor}</span>
+            {event.actorEmail && event.actorEmail !== event.actor && (
+              <span className="truncate text-xs text-ink-muted">{event.actorEmail}</span>
+            )}
+            <span className={cn('rounded-sm border px-1.5 py-0.5 text-[11px] font-medium', toneClass)}>{event.actionLabel}</span>
           </div>
-          <p className="mt-1 break-words text-sm text-ink-soft">
+          <p className="mt-1.5 max-w-3xl break-words text-sm leading-relaxed text-ink-soft">
             {event.object}
           </p>
-          <p className="mt-0.5 text-xs text-ink-muted">{event.timestamp ? formatDate(event.timestamp, 'long') : 'Time unavailable'}</p>
-          {event.metadata && <p className="mt-0.5 text-xs text-ink-muted">{event.metadata}</p>}
+          {event.metadata.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {event.metadata.map((item) => (
+                <span key={item} className="rounded-sm bg-paper-deep px-1.5 py-0.5 text-[11px] text-ink-muted">{item}</span>
+              ))}
+            </div>
+          )}
         </div>
-        {event.amount != null && (
-          <p className="num text-sm text-ink sm:text-right">
-            <Money value={event.amount} currency={event.currency} />
+        <div className="shrink-0 sm:text-right">
+          <p className="text-xs font-medium text-ink-muted" title={event.timestamp ? formatDate(event.timestamp, 'long') : undefined}>
+            {event.timestamp ? formatDate(event.timestamp, 'relative') : 'Time unavailable'}
           </p>
-        )}
+          {event.timestamp && <p className="mt-0.5 text-[11px] text-ink-muted">{formatDate(event.timestamp, 'long')}</p>}
+          {event.amount != null && (
+            <p className="mt-1.5 text-sm text-ink tabular-nums">
+              <Money value={event.amount} currency={event.currency} />
+            </p>
+          )}
+        </div>
       </div>
     </li>
   );
@@ -300,10 +326,10 @@ function ActivityItem({ event }) {
 
 function SummaryMetric({ label, value, helper }) {
   return (
-    <div className="rounded-md border border-rule bg-paper px-4 py-2.5">
+    <div className="border-b border-rule px-3 py-2.5 odd:border-r even:border-r-0 lg:border-b-0 lg:border-r lg:px-4 lg:last:border-r-0">
       <p className="text-xs text-ink-muted">{label}</p>
-      <p className="mt-1 break-words text-xl font-medium text-ink">{value}</p>
-      {helper && <p className="mt-1 text-xs text-ink-muted">{helper}</p>}
+      <p className="mt-0.5 break-words text-base font-semibold text-ink sm:text-lg">{value}</p>
+      {helper && <p className="mt-0.5 text-[11px] text-ink-muted">{helper}</p>}
     </div>
   );
 }

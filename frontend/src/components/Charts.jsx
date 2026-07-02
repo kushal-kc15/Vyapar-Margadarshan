@@ -158,12 +158,12 @@ export function DonutChart({
         {(centerLabel || centerValue) && (
           <g>
             {centerValue && (
-              <text x="50%" y="48%" textAnchor="middle" className="num" fontSize="20" fontWeight="600" fill={INK} fontFamily="IBM Plex Mono">
+              <text x="50%" y="48%" textAnchor="middle" className="num" fontSize="20" fontWeight="600" fill={INK} fontFamily="Inter, ui-sans-serif, system-ui, sans-serif">
                 {centerValue}
               </text>
             )}
             {centerLabel && (
-              <text x="50%" y="65%" textAnchor="middle" fontSize="9" letterSpacing="1.2" fill={INK_MUTED} fontFamily="IBM Plex Sans">
+              <text x="50%" y="65%" textAnchor="middle" fontSize="9" letterSpacing="1.2" fill={INK_MUTED} fontFamily="Inter, ui-sans-serif, system-ui, sans-serif">
                 {centerLabel.toUpperCase()}
               </text>
             )}

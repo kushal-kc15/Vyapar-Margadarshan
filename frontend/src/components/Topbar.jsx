@@ -13,6 +13,7 @@ const PAGE_CONTEXT = [
   { path: '/approvals', title: 'Approvals', subtitle: 'Review pending expenses' },
   { path: '/budgets', title: 'Budgets', subtitle: 'Track spending against budgets' },
   { path: '/reports', title: 'Reports', subtitle: 'Approved expense insights' },
+  { path: '/insights', title: 'Spending Intelligence', subtitle: 'Review budget pressure, unusual expense patterns, and AI-generated spending summaries.' },
   { path: '/vendors', title: 'Vendors', subtitle: 'Vendor spending history' },
   { path: '/team', title: 'Team', subtitle: 'Members and invitations' },
   { path: '/activity', title: 'Activity', subtitle: 'Workspace activity' },
@@ -34,7 +35,7 @@ export function Topbar() {
     <header className="sticky top-0 z-30 bg-paper/90 backdrop-blur border-b border-rule transition-shadow duration-200">
       <div className="flex h-16 items-center gap-2 px-3 sm:gap-3 sm:px-6">
         <div className="md:hidden shrink-0">
-          <Logo size={24} className="[&>span]:hidden" withWordmark />
+          <Logo size={32} />
         </div>
 
         <div className="min-w-0 flex-1 pr-2">

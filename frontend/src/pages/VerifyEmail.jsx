@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
-import Logo from '../components/Logo.jsx';
+import AuthLayout from '../components/AuthLayout.jsx';
 import Button from '../components/Button.jsx';
 import api from '../lib/api.js';
 import { useToast } from '../components/Toast.jsx';
@@ -69,18 +69,14 @@ export default function VerifyEmail() {
   }, [verificationToken, toast, navigate]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-paper">
-      <header className="px-4 py-5 sm:px-10 flex flex-wrap items-center justify-between gap-3">
-        <Link to="/">
-          <Logo size={28} withWordmark wordmarkSize="lg" />
-        </Link>
+    <AuthLayout
+      headerAction={
         <Link to="/login" className="text-sm text-ink-soft hover:text-ink transition-colors">
           Back to sign in
         </Link>
-      </header>
-
-      <main className="flex-1 flex items-center justify-center px-4 py-8 sm:px-10 sm:py-10">
-        <div className="w-full max-w-sm text-center">
+      }
+    >
+        <div className="w-full text-center">
           {state === 'verifying' && (
             <div className="space-y-4">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-paper-deep text-ink-muted">
@@ -151,7 +147,6 @@ export default function VerifyEmail() {
             </div>
           )}
         </div>
-      </main>
-    </div>
+    </AuthLayout>
   );
 }

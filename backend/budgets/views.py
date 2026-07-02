@@ -3,7 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Q
 from decimal import Decimal
 from .models import Budget, BudgetAlert
 from .serializers import BudgetSerializer, BudgetAlertSerializer
@@ -11,6 +11,7 @@ from .emails import send_budget_alert_email
 from notifications.utils import notify_budget_alert, notify_budget_exceeded
 from organizations.context import get_active_membership
 from organizations.models import OrganizationMember
+from expenses.categories import REAL_EXPENSE_CATEGORY_CODES
 
 
 class BudgetViewSet(viewsets.ModelViewSet):
@@ -77,7 +78,7 @@ class BudgetViewSet(viewsets.ModelViewSet):
         spent_amount = serializer.data['spent_amount']
         
         # Check if budget exceeded
-        if percentage_used > 100:
+        if percentage_used >= 100:
             # Check if exceeded alert already exists
             existing_exceeded = BudgetAlert.objects.filter(
                 budget=budget,
@@ -203,10 +204,30 @@ class BudgetViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(budgets, many=True)
         data = serializer.data
 
-        total_spent = sum(b['spent_amount'] for b in data)
+        total_spent = 0
+        if budgets:
+            from expenses.models import Expense
+
+            covered_dates = Q()
+            for budget in budgets:
+                covered_dates |= Q(
+                    date__gte=budget.start_date,
+                    date__lte=budget.end_date,
+                )
+            total_spent = float(
+                Expense.objects.filter(
+                    covered_dates,
+                    organization_id=budgets[0].organization_id,
+                    status='APPROVED',
+                ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+            )
 
         # Count budgets by status
-        at_risk = sum(1 for b in data if b['percentage_used'] >= 80 and b['percentage_used'] < 100)
+        at_risk = sum(
+            1
+            for b in data
+            if b['percentage_used'] >= b['alert_threshold'] and b['percentage_used'] < 100
+        )
         exceeded = sum(1 for b in data if b['percentage_used'] >= 100)
 
         return Response({
@@ -230,10 +251,7 @@ class BudgetViewSet(viewsets.ModelViewSet):
             return Response({'error': 'User not in organization'}, status=400)
         
         # Get all categories
-        categories = [
-            'FOOD', 'TRANSPORT', 'OFFICE', 'UTILITIES',
-            'SALARY', 'RENT', 'MARKETING', 'OTHER'
-        ]
+        categories = sorted(REAL_EXPENSE_CATEGORY_CODES)
         
         expense_stats = {
             row['category']: row

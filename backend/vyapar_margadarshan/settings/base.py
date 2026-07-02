@@ -71,6 +71,8 @@ def database_config_from_url(database_url):
 
 SECRET_KEY = config('SECRET_KEY', default=INSECURE_SECRET_KEY)
 
+GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
+
 DEBUG = config_bool('DEBUG', default=True)
 
 ALLOWED_HOSTS = config_list('ALLOWED_HOSTS', default='localhost,127.0.0.1')

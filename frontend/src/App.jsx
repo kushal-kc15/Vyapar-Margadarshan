@@ -16,6 +16,7 @@ import Expenses from "./pages/Expenses.jsx";
 import Approvals from "./pages/Approvals.jsx";
 import Budgets from "./pages/Budgets.jsx";
 import Reports from "./pages/Reports.jsx";
+import Insights from "./pages/Insights.jsx";
 import Vendors from "./pages/Vendors.jsx";
 import Team from "./pages/Team.jsx";
 import Activity from "./pages/Activity.jsx";
@@ -127,6 +128,14 @@ export default function App() {
           element={
             <ProtectedRoute roles={["OWNER", "Owner"]}>
               <Reports />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/insights"
+          element={
+            <ProtectedRoute roles={["OWNER", "Owner"]}>
+              <Insights />
             </ProtectedRoute>
           }
         />

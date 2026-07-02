@@ -5,6 +5,7 @@ import {
   CheckSquare,
   Wallet,
   BarChart3,
+  BrainCircuit,
   Store,
   Users,
   Bell,
@@ -22,6 +23,7 @@ const PRIMARY = [
   { key: 'approvals', to: '/approvals', label: 'Approvals', icon: CheckSquare, ownerOnly: true, badgeKey: 'pendingApprovals' },
   { key: 'budgets', to: '/budgets', label: 'Budgets', icon: Wallet, ownerOnly: true },
   { key: 'reports', to: '/reports', label: 'Reports', icon: BarChart3, ownerOnly: true },
+  { key: 'insights', to: '/insights', label: 'Insights', icon: BrainCircuit, ownerOnly: true },
   { key: 'vendors', to: '/vendors', label: 'Vendors', icon: Store, ownerOnly: true },
 ];
 
@@ -44,10 +46,10 @@ export function Sidebar({ badges = {} }) {
         to={item.to}
         className={({ isActive }) =>
           cn(
-            'group flex items-center gap-2.5 h-9 pl-2.5 pr-3 rounded-sm text-sm transition-all duration-150 focus-visible:outline-2 focus-visible:outline-ink focus-visible:outline-offset-2',
+            'group flex h-9 items-center gap-2.5 rounded-sm pl-2.5 pr-3 text-sm transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-ink focus-visible:outline-offset-2',
             isActive
               ? 'bg-ink text-paper font-medium shadow-sm'
-              : 'text-ink-soft hover:bg-paper-deep hover:text-ink hover:scale-[1.02]'
+              : 'text-ink-soft hover:bg-paper-deep hover:text-ink'
           )
         }
       >
@@ -108,9 +110,9 @@ export function Sidebar({ badges = {} }) {
                   to={item.to}
                   className={({ isActive }) =>
                     cn(
-                      'relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-full px-2 text-[11px] font-medium transition-all duration-150 focus-visible:outline-2 focus-visible:outline-ink focus-visible:outline-offset-2',
+                      'relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-full px-2 text-[11px] font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-ink focus-visible:outline-offset-2',
                       isActive
-                        ? 'bg-ink text-paper shadow-sm scale-[0.96]'
+                        ? 'bg-ink text-paper shadow-sm'
                         : 'text-ink-muted hover:bg-paper-deep hover:text-ink'
                     )
                   }

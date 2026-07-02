@@ -6,7 +6,7 @@ import { formatDate } from '../lib/date.js';
 import { cn } from '../lib/utils.js';
 import { Spinner, Skeleton } from './Feedback.jsx';
 
-const POLL_INTERVAL = 30000;
+const POLL_INTERVAL = 5000;
 
 const notificationTime = (notification) => notification?.time_ago || formatDate(notification?.created_at, 'short');
 const notificationTitle = (notification) => notification?.title || 'Notification';
@@ -107,8 +107,25 @@ export function NotificationBell() {
   }, []);
 
   useEffect(() => {
-    if (!open) return;
-    loadRecent();
+    if (!open) return undefined;
+
+    let cancelled = false;
+
+    const tick = () => {
+      if (cancelled) return;
+      loadRecent();
+    };
+
+    // Initial load when opening
+    tick();
+
+    // Lightweight refresh while dropdown is open
+    const timer = setInterval(tick, POLL_INTERVAL);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [open, loadRecent]);
 
   const navigateSafely = (url) => {

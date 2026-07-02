@@ -12,6 +12,13 @@ const PROCESSING = ['PENDING', 'PROCESSING'];
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const REVIEWABLE = ['COMPLETED', 'VERIFIED'];
 
+const todayInputValue = () => {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 10);
+};
+
 const readableWarning = (warning) =>
   String(warning || '')
     .replace(/_/g, ' ')
@@ -89,7 +96,7 @@ export function OCRReceiptModal({ open, onClose, onCreated }) {
     const scan = data.scan || {};
     const vendor = data.vendor_name ?? scan.vendor ?? '';
     const amount = data.total_amount ?? scan.amount ?? '';
-    const receiptDate = data.receipt_date ?? scan.date ?? new Date().toISOString().slice(0, 10);
+    const receiptDate = data.receipt_date ?? scan.date ?? '';
     const category = data.category ?? scan.category ?? 'OTHER';
     const description = data.description ?? scan.notes ?? 'Created from AI receipt scan';
     setReceipt(data);
@@ -97,6 +104,7 @@ export function OCRReceiptModal({ open, onClose, onCreated }) {
       vendor_name: vendor,
       total_amount: amount,
       receipt_date: receiptDate,
+      expense_date: todayInputValue(),
       category,
       description,
       title: vendor ? `Receipt from ${vendor}` : 'Receipt expense',
@@ -153,8 +161,8 @@ export function OCRReceiptModal({ open, onClose, onCreated }) {
 
   const createExpense = async () => {
     if (!receipt) return;
-    if (!form.vendor_name || !form.total_amount || !form.receipt_date) {
-      setError('Vendor, amount, and date are required before creating an expense.');
+    if (!form.vendor_name || !form.total_amount || !form.receipt_date || !form.expense_date) {
+      setError('Vendor, amount, receipt date, and expense date are required before creating an expense.');
       return;
     }
 
@@ -174,7 +182,7 @@ export function OCRReceiptModal({ open, onClose, onCreated }) {
         title: form.title,
         amount: form.total_amount,
         vendor: form.vendor_name,
-        date: form.receipt_date,
+        date: form.expense_date,
         category: form.category,
         description: form.description,
       });
@@ -200,6 +208,7 @@ export function OCRReceiptModal({ open, onClose, onCreated }) {
     form.vendor_name &&
     form.total_amount &&
     form.receipt_date &&
+    form.expense_date &&
     !busy
   );
   const warnings = Array.isArray(receipt?.ocr_validation_warnings)
@@ -212,7 +221,7 @@ export function OCRReceiptModal({ open, onClose, onCreated }) {
     return [
       ['Vendor', receipt.vendor_confidence],
       ['Amount', receipt.amount_confidence],
-      ['Date', receipt.date_confidence],
+      ['Receipt date', receipt.date_confidence],
     ].filter(([, value]) => value !== null && value !== undefined && value !== '');
   }, [receipt]);
 
@@ -380,9 +389,9 @@ export function OCRReceiptModal({ open, onClose, onCreated }) {
               <div className="grid grid-cols-1 gap-3">
                 <Input
                   type="date"
-                  label="Date"
-                  value={form.receipt_date ?? ''}
-                  onChange={(e) => setForm((f) => ({ ...f, receipt_date: e.target.value }))}
+                  label="Expense date"
+                  value={form.expense_date ?? ''}
+                  onChange={(e) => setForm((f) => ({ ...f, expense_date: e.target.value }))}
                   required
                 />
                 <Select
@@ -406,7 +415,8 @@ export function OCRReceiptModal({ open, onClose, onCreated }) {
               />
 
               <p className="text-xs text-ink-muted">
-                Extracted amount: <Money value={form.total_amount || 0} size="sm" />
+                Receipt date detected: {form.receipt_date || 'Not detected'} · Extracted amount:{' '}
+                <Money value={form.total_amount || 0} size="sm" />
               </p>
 
               {lineItems.length > 0 && (
@@ -432,7 +442,7 @@ export function OCRReceiptModal({ open, onClose, onCreated }) {
 
               {!canCreate && (
                 <p className="text-xs text-ink-muted">
-                  Vendor, amount, and date are required before creating an expense.
+                  Vendor, amount, receipt date, and expense date are required before creating an expense.
                 </p>
               )}
 
