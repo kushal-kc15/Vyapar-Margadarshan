@@ -213,6 +213,8 @@ export default function Login() {
 
   return (
     <AuthLayout
+      className="auth-light"
+      cardClassName="-translate-y-4 sm:-translate-y-6"
       headerAction={
         view === 'password' ? (
             <Link

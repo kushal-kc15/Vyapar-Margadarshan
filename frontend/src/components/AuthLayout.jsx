@@ -9,9 +9,18 @@ const FEATURES = [
   'Budget and report insights',
 ];
 
-export default function AuthLayout({ children, headerAction, cardClassName = '' }) {
+export default function AuthLayout({
+  children,
+  headerAction,
+  cardClassName = '',
+  contentClassName = '',
+  className = '',
+}) {
   return (
-    <div className="grid min-h-screen min-w-0 overflow-x-hidden bg-paper lg:grid-cols-[minmax(20rem,0.85fr)_minmax(0,1.15fr)]">
+    <div className={cn(
+      'grid min-h-screen min-w-0 overflow-x-hidden bg-paper lg:grid-cols-[minmax(20rem,0.85fr)_minmax(0,1.15fr)]',
+      className,
+    )}>
       <aside className="hidden border-r border-rule bg-paper-deep/70 p-10 lg:flex lg:flex-col xl:p-14">
         <Link to="/" className="w-fit">
           <Logo size={52} showText wordmarkSize="lg" />
@@ -47,7 +56,7 @@ export default function AuthLayout({ children, headerAction, cardClassName = '' 
           <div className="ml-auto shrink-0 text-right">{headerAction}</div>
         </div>
 
-        <div className="flex flex-1 items-center justify-center py-6 sm:py-8">
+        <div className={cn('flex flex-1 items-center justify-center py-6 sm:py-8', contentClassName)}>
           <section
             className={cn(
               'w-full max-w-md rounded-lg border border-rule bg-paper p-5 shadow-sm sm:p-7',

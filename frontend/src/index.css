@@ -88,7 +88,8 @@
 
 /* The public landing page intentionally keeps its light editorial palette,
    regardless of the theme selected for the authenticated application. */
-.landing-light {
+.landing-light,
+.auth-light {
   color-scheme: light;
 
   --color-paper: 251 250 247;

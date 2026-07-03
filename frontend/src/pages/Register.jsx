@@ -162,6 +162,8 @@ export default function Register() {
 
   return (
     <AuthLayout
+      className="auth-light"
+      contentClassName="items-start"
       headerAction={
         <Link to="/login" className="text-sm text-ink-soft hover:text-ink transition-colors">
           Already have an account?{" "}
