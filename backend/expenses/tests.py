@@ -281,6 +281,30 @@ class ExpenseDashboardMetricsScopeTestCase(TestCase):
         self.assertTrue(response.data['daily_trend'])
         self.assertTrue(all(point['amount'] == 0 for point in response.data['daily_trend']))
 
+    @patch('expenses.views.timezone.localdate', return_value=date(2026, 7, 3))
+    def test_dashboard_uses_local_date_for_today_and_daily_trend(self, _localdate):
+        self.create_expense(
+            user=self.staff,
+            amount='76500.98',
+            expense_date=date(2026, 7, 2),
+            title='Previous local day spend',
+        )
+        self.create_expense(
+            user=self.staff,
+            amount='1252.00',
+            expense_date=date(2026, 7, 3),
+            title='Current local day spend',
+        )
+
+        response = self.get_metrics(self.owner)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['today']['total'], 1252.0)
+        self.assertEqual(response.data['daily_trend'][-1], {
+            'date': date(2026, 7, 3),
+            'amount': 1252.0,
+        })
+
     def test_staff_metrics_include_only_their_own_approved_expenses(self):
         self.create_expense(user=self.staff, amount='75.00')
         self.create_expense(user=self.owner, amount='200.00')

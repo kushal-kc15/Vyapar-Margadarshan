@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Check,
   FileText,
@@ -78,6 +79,8 @@ const emptyCopy = (tab) => {
 };
 
 export default function Approvals() {
+  const [searchParams] = useSearchParams();
+  const requestedExpenseId = searchParams.get("expense_id");
   const { currency, role } = useAuth();
   const toast = useToast();
   const [tab, setTab] = useState("PENDING");
@@ -111,8 +114,14 @@ export default function Approvals() {
       .then((response) => {
         const data = response.data?.results ?? response.data ?? [];
         const list = Array.isArray(data) ? data : [];
+        const requestedIndex = requestedExpenseId
+          ? list.findIndex((expense) => String(expense.id) === requestedExpenseId)
+          : -1;
         setRows(list);
-        setSelected(list[0] ?? null);
+        setSelected(requestedIndex >= 0 ? list[requestedIndex] : (list[0] ?? null));
+        if (requestedIndex >= 0) {
+          setApprovalPage(Math.floor(requestedIndex / approvalPageSize) + 1);
+        }
       })
       .catch(() => {
         setRows([]);
@@ -122,7 +131,7 @@ export default function Approvals() {
         );
       })
       .finally(() => setLoading(false));
-  }, [tab, refreshKey]);
+  }, [tab, refreshKey, requestedExpenseId]);
 
   const totalAmount = useMemo(
     () => rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0),

@@ -26,7 +26,7 @@ export default function Logo({
         <img
           src="/vyapar-logo.png"
           alt="Vyapar Margadarshan"
-          className="absolute inset-0 block h-full w-full scale-[1.55] object-contain"
+          className="absolute inset-0 block h-full w-full scale-[1.7] object-contain"
           draggable="false"
         />
       </span>

@@ -53,8 +53,8 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     
     @action(detail=False, methods=['delete'])
     def clear_all(self, request):
-        """Delete all read notifications"""
-        deleted_count, _ = self.get_queryset().filter(is_read=True).delete()
+        """Delete all notifications for the current user."""
+        deleted_count, _ = self.get_queryset().delete()
         return Response({
             'message': f'{deleted_count} notifications cleared',
             'count': deleted_count

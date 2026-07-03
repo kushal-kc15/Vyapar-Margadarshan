@@ -39,7 +39,7 @@ export default function App() {
       <Route
         path="/register"
         element={
-          <PublicOnly>
+          <PublicOnly resetIncompleteSession>
             <Register />
           </PublicOnly>
         }

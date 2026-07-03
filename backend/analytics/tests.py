@@ -199,6 +199,30 @@ class AnalyticsEndpointTestCase(TestCase):
         bad_range = self.client.get('/api/analytics/spending-trends/?start_date=2026-02-01&end_date=2026-01-01')
         self.assertEqual(bad_range.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_report_detail_daily_trend_includes_end_date(self):
+        Expense.objects.create(
+            organization=self.organization,
+            user=self.owner,
+            title='Current day expense',
+            amount=Decimal('252.00'),
+            category='OTHER',
+            date=date(2026, 7, 3),
+            status='APPROVED',
+        )
+        self.authenticate(self.owner)
+
+        response = self.client.get(
+            '/api/analytics/report-detail/?start_date=2026-07-01&end_date=2026-07-03&period=daily'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        july_third = next(
+            row for row in response.data['trends']
+            if row['period_start'] == date(2026, 7, 3)
+        )
+        self.assertGreaterEqual(july_third['total'], 252.0)
+        self.assertIn('Current day expense', {row['title'] for row in response.data['expenses']})
+
     def test_vendor_summary_limits_and_sorts_vendors(self):
         self.authenticate(self.owner)
 
@@ -452,8 +476,21 @@ class AnalyticsEndpointTestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data['generated_by_ai'])
         self.assertEqual(response.data['provider'], 'fallback')
+        self.assertEqual(response.data['source'], 'fallback')
         self.assertTrue(response.data['summary'])
+        self.assertEqual(response.data['observations'], response.data['insights'])
+        self.assertEqual(response.data['suggestions'], response.data['recommendations'])
         self.assertGreaterEqual(len(response.data['recommendations']), 1)
+
+    def test_ai_insights_falls_back_on_unexpected_provider_error(self):
+        self.authenticate(self.owner)
+
+        with patch('analytics.views.generate_ai_insight', side_effect=RuntimeError('unexpected failure')):
+            response = self.client.get('/api/analytics/ai-insights/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['source'], 'fallback')
+        self.assertTrue(response.data['summary'])
 
     def test_staff_ai_insights_uses_only_own_approved_expenses(self):
         self.authenticate(self.staff)
@@ -476,6 +513,11 @@ class AnalyticsEndpointTestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data['enough_data'])
         self.assertEqual(response.data['insights'], [])
+        self.assertEqual(response.data['source'], 'none')
+        self.assertEqual(
+            response.data['summary'],
+            'No approved spending data is available for the selected period.',
+        )
         generate.assert_not_called()
 
     def test_ai_insights_rejects_unknown_period(self):
@@ -525,6 +567,8 @@ class AnalyticsEndpointTestCase(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         anomalies = {item['expense_id']: item for item in response.data['anomalies']}
         self.assertIn(high_expense.id, anomalies)
+        self.assertNotIn(duplicate.id, anomalies)
+        self.assertTrue(all(item['status'] == 'PENDING' for item in anomalies.values()))
         reason_codes = {reason['code'] for reason in anomalies[high_expense.id]['reasons']}
         self.assertIn('HIGH_CATEGORY_AMOUNT', reason_codes)
         self.assertIn('HIGH_VENDOR_AMOUNT', reason_codes)

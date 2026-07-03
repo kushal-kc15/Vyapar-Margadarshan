@@ -260,6 +260,7 @@ RECEIPT_ALLOWED_CONTENT_TYPES = config_list(
 AI_RECEIPT_SCAN_ENABLED = config_bool('AI_RECEIPT_SCAN_ENABLED', default=True)
 GEMINI_API_KEY = config('GEMINI_API_KEY', default='')
 GEMINI_RECEIPT_MODEL = config('GEMINI_RECEIPT_MODEL', default='gemini-2.5-flash')
+GEMINI_INSIGHTS_MODEL = config('GEMINI_INSIGHTS_MODEL', default='gemini-2.5-flash')
 RECEIPT_OCR_USE_QUEUE = config_bool('RECEIPT_OCR_USE_QUEUE', default=False)
 
 # Default primary key field type

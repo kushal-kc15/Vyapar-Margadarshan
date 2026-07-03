@@ -61,6 +61,11 @@ const greeting = () => {
         : "Good evening";
 };
 
+const parseCalendarDate = (value) =>
+  typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00`)
+    : new Date(value);
+
 /* ------------------------------------------------------------------ *
  * Reveal — fades a block in on mount with a configurable delay.
  * ------------------------------------------------------------------ */
@@ -327,7 +332,7 @@ export default function Dashboard() {
       return [];
     }
     return points.map((point) => ({
-      label: new Date(point.date).toLocaleDateString(undefined, {
+      label: parseCalendarDate(point.date).toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
       }),

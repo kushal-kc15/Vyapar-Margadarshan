@@ -35,19 +35,32 @@ export function ProtectedRoute({ children, roles, requireOrg = true }) {
   return children;
 }
 
-export function PublicOnly({ children }) {
-  const { user, token, loading, organization } = useAuth();
+export function PublicOnly({ children, resetIncompleteSession = false }) {
+  const { user, token, loading, organization, logout } = useAuth();
   const [params] = useSearchParams();
   const invite = params.get("invite");
+  const next = getSafeNextPath(params.get("next") || "");
+  const pendingInvite = invite || readPendingInviteToken();
+  const shouldResetSession = Boolean(
+    resetIncompleteSession && token && user && !organization && !next && !pendingInvite,
+  );
 
   useEffect(() => {
     if (invite) storePendingInviteToken(invite);
   }, [invite]);
 
-  if (loading) return null;
+  useEffect(() => {
+    if (shouldResetSession) logout();
+  }, [logout, shouldResetSession]);
+
+  if (loading || shouldResetSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-paper">
+        <Spinner size={20} className="text-ink-muted" />
+      </div>
+    );
+  }
   if (token && user) {
-    const next = getSafeNextPath(params.get("next") || "");
-    const pendingInvite = invite || readPendingInviteToken();
     if (next) return <Navigate to={next} replace />;
     if (pendingInvite) return <Navigate to={getInvitePath(pendingInvite)} replace />;
     return (

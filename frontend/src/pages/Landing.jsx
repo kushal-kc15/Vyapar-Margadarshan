@@ -150,9 +150,9 @@ function Hero() {
             </div>
 
             <h1 className="font-display font-medium text-[2.45rem] sm:text-[3.15rem] lg:text-[3.7rem] xl:text-[4rem] leading-[1.03] tracking-[-0.035em] text-ink text-balance">
-              An expense book for the way money{' '}
+              Manage Business Expenses with{' '}
               <span className="relative inline-block">
-                <span className="relative z-10">actually moves</span>
+                <span className="relative z-10">Clarity</span>
                 <svg
                   aria-hidden
                   viewBox="0 0 220 10"
@@ -168,12 +168,11 @@ function Hero() {
                   />
                 </svg>
               </span>
-              {' '}in a small business.
             </h1>
 
             <p className="mt-4 max-w-[48ch] text-base sm:text-lg text-ink-soft leading-[1.6] text-pretty">
-              Replace scattered receipts and spreadsheets with a working ledger —
-              every rupee, every receipt, every approval, on one clean page.
+              Vyapar Margadarshan helps small businesses record expenses, organize receipts,
+              monitor budgets, and review spending through a simple web-based system.
             </p>
 
             <div className="mt-7 flex flex-wrap items-center gap-3 sm:gap-4">
@@ -181,24 +180,24 @@ function Hero() {
                 to="/register"
                 className="group inline-flex h-11 sm:h-12 items-center gap-2 px-6 sm:px-7 rounded-full bg-cinnabar-500 text-paper text-sm sm:text-base font-medium shadow-md shadow-cinnabar-500/25 hover:bg-cinnabar-600 hover:shadow-cinnabar-500/40 transition-all"
               >
-                Start free
+                Get Started
                 <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
               </Link>
               <Link
                 to="/login"
                 className="inline-flex h-11 sm:h-12 items-center gap-1.5 px-2 text-sm sm:text-base text-ink-soft border-b-2 border-transparent hover:border-cinnabar-500/40 hover:text-ink transition-all"
               >
-                I already have a book
+                View Demo
               </Link>
             </div>
 
             <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-muted">
               <span className="flex items-center gap-1.5">
                 <span className="h-1 w-1 rounded-full bg-moss-500" />
-                Free during beta
+                Final year project
               </span>
               <span className="text-ink-faint">·</span>
-              <span>No card required</span>
+              <span>Web-based system</span>
               <span className="text-ink-faint">·</span>
               <span>NPR · INR · USD · EUR</span>
             </div>
@@ -285,16 +284,16 @@ function ProofStrip() {
               />
             ))}
           </span>
-          <span>Used by small shops, contractors, and field teams across Nepal.</span>
+          <span>Designed for small business expense management.</span>
         </span>
         <div className="flex items-center gap-5">
           <span className="flex items-center gap-1.5">
-            <span className="text-moss-600 font-semibold">₨ 2.4 Cr+</span> tracked this month
+            <span className="text-moss-600 font-semibold">Expenses</span> organized in one place
           </span>
           <span className="hidden sm:inline text-ink-faint">·</span>
           <span className="hidden sm:flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 rounded-full bg-ink-faint" />
-            Web · Android · iOS
+            Records · Receipts · Budgets
           </span>
         </div>
       </div>
@@ -311,15 +310,15 @@ function Instruments() {
         {/* Section header */}
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6 mb-14">
           <div>
-            <Eyebrow className="mb-3 text-cinnabar-600">The workflow</Eyebrow>
+            <Eyebrow className="mb-3 text-cinnabar-600">System functions</Eyebrow>
             <h2 className="font-display font-medium text-3xl sm:text-4xl lg:text-5xl leading-[1.05] tracking-[-0.03em] text-ink text-balance max-w-[14ch]">
-              Four instruments.{' '}
-              <span className="text-ink-muted">One page.</span>
+              Core{' '}
+              <span className="text-ink-muted">Features</span>
             </h2>
           </div>
           <p className="text-ink-soft text-base leading-relaxed max-w-[40ch] lg:text-right">
-            The ledger is the product. Everything else — the camera, the routing,
-            the totals — exists to keep the page honest.
+            The system includes the main tools needed to manage daily business
+            expenses and financial records.
           </p>
         </div>
 
@@ -329,8 +328,8 @@ function Instruments() {
             <div className="flex items-start justify-between gap-3 pb-4 mb-1">
               <div>
                 <Eyebrow>Record</Eyebrow>
-                <h3 className="font-display text-xl mt-1 text-ink">The day book</h3>
-                <p className="text-sm text-ink-soft mt-0.5">Every rupee, in order.</p>
+                <h3 className="font-display text-xl mt-1 text-ink">Expense Tracking</h3>
+                <p className="text-sm text-ink-soft mt-0.5">Record expenses with complete details.</p>
               </div>
               <div className="h-9 w-9 rounded-lg bg-paper-deep border border-rule flex items-center justify-center text-ink-faint shrink-0">
                 <CornerDownRight size={15} aria-hidden />
@@ -364,8 +363,8 @@ function Instruments() {
             <div className="flex items-start justify-between gap-3 pb-4 mb-1">
               <div>
                 <Eyebrow>Capture</Eyebrow>
-                <h3 className="font-display text-xl mt-1 text-ink">Receipts</h3>
-                <p className="text-sm text-ink-soft mt-0.5">A photo. A line in the book.</p>
+                <h3 className="font-display text-xl mt-1 text-ink">Receipt Management</h3>
+                <p className="text-sm text-ink-soft mt-0.5">Keep receipts linked with expense records.</p>
               </div>
               <div className="h-9 w-9 rounded-lg bg-paper-deep border border-rule flex items-center justify-center text-ink-faint shrink-0">
                 <Camera size={15} aria-hidden />
@@ -433,8 +432,8 @@ function Instruments() {
             <div className="flex items-start justify-between gap-3 pb-4 mb-1">
               <div>
                 <Eyebrow>Review</Eyebrow>
-                <h3 className="font-display text-xl mt-1 text-ink">Approvals</h3>
-                <p className="text-sm text-ink-soft mt-0.5">A tap. A line. Done.</p>
+                <h3 className="font-display text-xl mt-1 text-ink">Approval Workflow</h3>
+                <p className="text-sm text-ink-soft mt-0.5">Review, approve, or reject submitted expenses.</p>
               </div>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cinnabar-50 text-cinnabar-700 text-[11px] font-medium border border-cinnabar-200/30">
                 <span className="h-1.5 w-1.5 rounded-full bg-cinnabar-500 animate-pulse" aria-hidden />
@@ -488,8 +487,8 @@ function Instruments() {
             <div className="flex items-start justify-between gap-3 pb-4 mb-1">
               <div>
                 <Eyebrow>Track</Eyebrow>
-                <h3 className="font-display text-xl mt-1 text-ink">Budgets</h3>
-                <p className="text-sm text-ink-soft mt-0.5">A red rule, before it breaks.</p>
+                <h3 className="font-display text-xl mt-1 text-ink">Budget Monitoring</h3>
+                <p className="text-sm text-ink-soft mt-0.5">Compare actual spending with planned limits.</p>
               </div>
               <div className="h-9 w-9 rounded-lg bg-paper-deep border border-rule flex items-center justify-center text-ink-faint shrink-0">
                 <BarChart3 size={15} aria-hidden />
@@ -523,7 +522,7 @@ function Instruments() {
               </ul>
               <p className="mt-5 text-xs text-ink-muted leading-relaxed border-t border-rule/60 pt-4 flex items-center gap-2">
                 <span className="h-1.5 w-1.5 rounded-full bg-cinnabar-500" aria-hidden />
-                Turns cinnabar at 85%. You find out before the budget does.
+                Budget indicators show when spending approaches the planned limit.
               </p>
             </div>
           </article>
@@ -568,11 +567,11 @@ function Pricing() {
           <div>
             <Eyebrow className="mb-3 text-cinnabar-600">Pricing</Eyebrow>
             <h2 className="font-display font-medium text-3xl sm:text-4xl leading-[1.05] tracking-[-0.025em] text-ink">
-              Simple plans for a simple book.
+              Plans for different business needs.
             </h2>
           </div>
           <p className="text-ink-soft leading-relaxed max-w-[42ch] lg:text-right text-sm">
-            Start free, add people when the workflow makes sense, keep the ledger clean.
+            Choose a plan based on the size and requirements of the organization.
           </p>
         </div>
 
@@ -682,11 +681,11 @@ function Testimonials() {
           <div>
             <Eyebrow className="mb-3 text-cinnabar-600">Testimonials</Eyebrow>
             <h2 className="font-display font-medium text-3xl sm:text-4xl leading-[1.05] tracking-[-0.025em] text-ink">
-              Notes from the counter.
+              Practical feedback from users.
             </h2>
           </div>
           <p className="text-ink-soft text-sm leading-relaxed max-w-[40ch] lg:text-right">
-            From the people who need the workflow practical: submit, review, total, export.
+            Feedback on expense submission, review, budgets, and reports.
           </p>
         </div>
 
@@ -734,7 +733,7 @@ function FAQ() {
           <div className="col-span-12 lg:col-span-4">
             <Eyebrow className="mb-3 text-cinnabar-600">FAQ</Eyebrow>
             <h2 className="font-display font-medium text-3xl sm:text-4xl leading-[1.05] tracking-[-0.025em] text-ink">
-              Questions before opening the book.
+              Common questions about the system.
             </h2>
             <p className="mt-4 text-sm leading-relaxed text-ink-muted max-w-[28ch]">
               Practical answers about submissions, approvals, scanning, and reports.
@@ -777,10 +776,10 @@ function Closer() {
           <div className="absolute -bottom-20 -left-20 h-60 w-60 rounded-full bg-moss-500/5 blur-2xl pointer-events-none" />
 
           <div className="relative">
-            <Eyebrow className="mb-3 text-cinnabar-600">Built for the workshop</Eyebrow>
+            <Eyebrow className="mb-3 text-cinnabar-600">Project objective</Eyebrow>
             <p className="font-display text-2xl sm:text-3xl lg:text-4xl leading-[1.15] tracking-[-0.025em] text-ink max-w-[22ch]">
-              A ledger, a printer, and a phone.
-              <span className="text-ink-muted"> That is the whole workshop.</span>
+              A Practical Expense Management System
+              <span className="text-ink-muted"> for small businesses.</span>
             </p>
           </div>
           <div className="relative flex flex-col sm:items-end gap-3 shrink-0">
@@ -788,10 +787,10 @@ function Closer() {
               to="/register"
               className="group inline-flex h-12 items-center gap-2 px-7 rounded-full bg-cinnabar-500 text-paper text-base font-medium shadow-md shadow-cinnabar-500/25 hover:bg-cinnabar-600 hover:shadow-cinnabar-500/40 transition-all"
             >
-              Create account
+              Get Started
               <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
             </Link>
-            <p className="text-xs text-ink-muted">Free during beta. No card required.</p>
+            <p className="text-xs text-ink-muted">Manage records and review spending from one place.</p>
           </div>
         </div>
       </div>
@@ -812,7 +811,7 @@ function Footer() {
         </div>
         <span className="flex items-center gap-2">
           <span className="h-1.5 w-1.5 rounded-full bg-moss-500" />
-          Made for small businesses, in Kathmandu.
+          Final year project for small business expense management.
         </span>
       </div>
     </footer>
@@ -823,7 +822,7 @@ function Footer() {
 
 export default function Landing() {
   return (
-    <div className="min-h-screen bg-paper text-ink antialiased">
+    <div className="landing-light min-h-screen bg-paper text-ink antialiased">
       <Nav />
       <main>
         <Hero />

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   Calendar,
@@ -32,7 +33,42 @@ const AI_PERIODS = [
   { value: "last_3_months", label: "Last 3 months" },
 ];
 
-const padDate = (date) => date.toISOString().slice(0, 10);
+const DISMISSED_HEALTH_CHECKS_KEY = "vyapar_spending_health_dismissed_checks";
+
+const advisoryKey = (advisory) =>
+  String(advisory?.id ?? `${advisory?.code ?? advisory?.type ?? "check"}-${advisory?.evidence?.budget_id ?? advisory?.title ?? advisory?.message ?? "item"}`);
+
+const getDismissedHealthChecks = (organizationId) => {
+  if (!organizationId) return [];
+  try {
+    const stored = JSON.parse(localStorage.getItem(DISMISSED_HEALTH_CHECKS_KEY) || "{}");
+    if (Array.isArray(stored)) return stored;
+    return Array.isArray(stored?.[organizationId]) ? stored[organizationId] : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveDismissedHealthChecks = (organizationId, keys) => {
+  if (!organizationId) return;
+  try {
+    const stored = JSON.parse(localStorage.getItem(DISMISSED_HEALTH_CHECKS_KEY) || "{}");
+    const byOrganization = stored && !Array.isArray(stored) && typeof stored === "object" ? stored : {};
+    localStorage.setItem(DISMISSED_HEALTH_CHECKS_KEY, JSON.stringify({
+      ...byOrganization,
+      [organizationId]: [...new Set(keys)],
+    }));
+  } catch {
+    // The checks still hide for this session when storage is unavailable.
+  }
+};
+
+const padDate = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 const monthBounds = (offset = 0) => {
   const now = new Date();
@@ -84,11 +120,14 @@ export default function Insights() {
   }, [preset]);
 
   useEffect(() => {
+    setDismissedAdviceKeys(getDismissedHealthChecks(organizationId));
+  }, [organizationId]);
+
+  useEffect(() => {
     if (!organizationId || !from || !to) return undefined;
     let cancelled = false;
     setRuleLoading(true);
     setRuleError("");
-    setDismissedAdviceKeys([]);
     setRuleModalOpen(false);
     api.get("/analytics/rule-based-advice/", { params: { start_date: from, end_date: to } })
       .then((response) => {
@@ -144,7 +183,7 @@ export default function Insights() {
     } catch {
       setAiInsights(null);
       setAiExpanded(true);
-      setAiError("Could not generate the AI spending summary right now. Try again later.");
+      setAiError("No spending summary is available at the moment. Summary will appear after approved expense data is available.");
     } finally {
       setAiLoading(false);
     }
@@ -155,15 +194,26 @@ export default function Insights() {
   );
   const clearAdvice = (advisory) => {
     const key = advisoryKey(advisory);
-    setDismissedAdviceKeys((current) => current.includes(key) ? current : [...current, key]);
+    setDismissedAdviceKeys((current) => {
+      const updated = current.includes(key) ? current : [...current, key];
+      saveDismissedHealthChecks(organizationId, updated);
+      return updated;
+    });
   };
+  const resetDismissedAdvice = () => {
+    saveDismissedHealthChecks(organizationId, []);
+    setDismissedAdviceKeys([]);
+  };
+  const hasHiddenAdvisories = (ruleAdvice?.advisories ?? []).some(
+    (advisory) => dismissedAdviceKeys.includes(advisoryKey(advisory)),
+  );
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 pb-6 pt-2 sm:px-6 lg:px-8">
       <PageHeader
         title="Spending Intelligence"
         byline="Expense review"
-        lede="Review budget pressure, unusual expense patterns, and AI-generated spending summaries."
+        lede="Review budget pressure, unusual expense patterns, and approved spending summaries."
         compact
         className="-mx-4 mb-3 sm:-mx-6 lg:-mx-8"
       />
@@ -195,6 +245,8 @@ export default function Insights() {
             currency={currency}
             onClear={clearAdvice}
             onShowAll={() => setRuleModalOpen(true)}
+            hasHiddenAdvisories={hasHiddenAdvisories}
+            onResetHidden={resetDismissedAdvice}
           />
         </main>
 
@@ -240,9 +292,7 @@ const RULE_TONES = {
   success: "bg-moss-50 text-moss-700 ring-moss-200",
 };
 
-const advisoryKey = (advisory) => `${advisory.code}-${advisory.evidence?.budget_id ?? advisory.title}`;
-
-function RuleBasedAdviceCard({ advisories, hadAdvisories, loading, error, currency, onClear, onShowAll }) {
+function RuleBasedAdviceCard({ advisories, hadAdvisories, loading, error, currency, onClear, onShowAll, hasHiddenAdvisories, onResetHidden }) {
   const visible = advisories.slice(0, 4);
   const hiddenCount = Math.max(0, advisories.length - visible.length);
   return (
@@ -251,7 +301,7 @@ function RuleBasedAdviceCard({ advisories, hadAdvisories, loading, error, curren
       <div className="px-4 py-2.5 sm:px-5">
         {loading ? <LoadingLine text="Checking approved spending and budgets..." /> :
           error ? <p className="text-sm text-cinnabar-700">{error}</p> :
-          advisories.length === 0 ? <EmptyLine text={hadAdvisories ? "All health checks cleared for this period." : "No spending concerns found for this period."} /> : (
+          advisories.length === 0 ? <EmptyLine text={hadAdvisories ? "No active spending health checks at the moment." : "No spending concerns found for this period."} /> : (
             <>
               <ul className="divide-y divide-rule">
                 {visible.map((advisory) => <li key={advisoryKey(advisory)} className="py-2.5 first:pt-0 last:pb-0"><AdviceItem advisory={advisory} currency={currency} onClear={onClear} /></li>)}
@@ -259,6 +309,7 @@ function RuleBasedAdviceCard({ advisories, hadAdvisories, loading, error, curren
               {hiddenCount > 0 && <button type="button" onClick={onShowAll} className="mt-3 border-t border-rule pt-2 text-sm font-semibold text-forest-700 hover:text-forest-600">+{hiddenCount} more health checks — Show all</button>}
             </>
           )}
+        {!loading && !error && hasHiddenAdvisories && <button type="button" onClick={onResetHidden} className="mt-3 text-xs font-medium text-ink-muted transition-colors hover:text-ink">Show hidden checks</button>}
       </div>
     </Panel>
   );
@@ -312,19 +363,27 @@ const ANOMALY_TONES = {
 const REASON_LABELS = {
   HIGH_CATEGORY_AMOUNT: "Higher than usual category spending",
   HIGH_VENDOR_AMOUNT: "Higher than usual vendor spending",
+  HIGH_AMOUNT: "High-value expense",
   DUPLICATE_CANDIDATE: "Possible duplicate",
   NEW_VENDOR: "New vendor",
-  WEEKEND_EXPENSE: "Weekend expense",
+  MISSING_RECEIPT: "No receipt attached",
+  MISSING_VENDOR: "Missing vendor information",
+  WEAK_DESCRIPTION: "Description needs more detail",
+  BUDGET_PRESSURE: "Budget is close to its limit",
+  BUDGET_EXCEEDED: "Budget limit would be exceeded",
+  OLD_PENDING_EXPENSE: "Waiting for review for several days",
 };
 
 function UnusualExpenseCard({ data, loading, error, currency }) {
-  const anomalies = data?.anomalies ?? [];
+  const anomalies = (data?.anomalies ?? []).filter(
+    (expense) => String(expense?.status ?? "").toUpperCase() === "PENDING",
+  );
   const visible = anomalies.slice(0, 5);
   const hiddenCount = Math.max(0, anomalies.length - visible.length);
   return <Panel className="overflow-hidden" aria-label="Expenses Needing Review">
     <InsightCardHeader icon={ScanSearch} tone="saffron" title="Expenses Needing Review" subtitle="Highlights expenses with unusual amount, vendor, date, or duplicate patterns." label="Review signals" />
     <div className="px-4 py-2.5">
-      {loading ? <LoadingLine text="Checking expense patterns..." /> : error ? <p className="text-xs text-cinnabar-700">{error}</p> : anomalies.length === 0 ? <EmptyLine text="No expenses need review for this period." /> : <>
+      {loading ? <LoadingLine text="Checking expense patterns..." /> : error ? <p className="text-xs text-cinnabar-700">{error}</p> : anomalies.length === 0 ? <EmptyLine text="No expenses are waiting for review at the moment." /> : <>
         <ul className="divide-y divide-rule">{visible.map((expense) => <li key={expense.expense_id} className="py-2.5 first:pt-0 last:pb-0"><AnomalyItem expense={expense} currency={currency} /></li>)}</ul>
         {hiddenCount > 0 && <p className="mt-2 border-t border-rule pt-2 text-xs font-medium text-ink-muted">+{hiddenCount} more unusual {hiddenCount === 1 ? "expense" : "expenses"}</p>}
       </>}
@@ -348,37 +407,43 @@ function AnomalyItem({ expense, currency }) {
       </div>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         <span className={`rounded-sm px-1.5 py-0.5 text-[11px] font-semibold ring-1 ${ANOMALY_TONES[expense.severity] ?? ANOMALY_TONES.LOW}`}>{expense.severity}</span>
-        <span className="num rounded-sm bg-paper-deep px-1.5 py-0.5 text-[11px] text-ink-soft">Review score {expense.score}</span>
+        <span className="num rounded-sm bg-paper-deep px-1.5 py-0.5 text-[11px] text-ink-soft">Review score {expense.risk_score ?? expense.score}/100</span>
         <span className="rounded-sm bg-paper-deep px-1.5 py-0.5 text-[11px] capitalize text-ink-muted">{String(expense.status || "").toLowerCase()}</span>
       </div>
       {firstReason && (
-        <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-ink-muted">
-          <span className="min-w-0 truncate">{REASON_LABELS[firstReason.code] ?? firstReason.message}{extraCount > 0 ? ` +${extraCount} more` : ""}</span>
-          {extraCount > 0 && <button type="button" onClick={() => setExpanded((value) => !value)} className="shrink-0 font-medium text-forest-700 hover:text-forest-600">{expanded ? "Hide" : "Details"}</button>}
+        <div className="mt-1.5 text-[11px] text-ink-muted">
+          <span className="block min-w-0 truncate">{REASON_LABELS[firstReason.code] ?? firstReason.message}{extraCount > 0 ? ` +${extraCount} more` : ""}</span>
+          {extraCount > 0 && <button type="button" onClick={() => setExpanded((value) => !value)} className="mt-1 block font-medium text-forest-700 hover:text-forest-600">{expanded ? "Hide details" : "Details"}</button>}
         </div>
       )}
       {expanded && <ul className="mt-1 space-y-0.5 text-[11px] text-ink-muted">{reasons.slice(1).map((reason) => <li key={reason.code}>• {REASON_LABELS[reason.code] ?? reason.message}</li>)}</ul>}
+      <Link
+        to={`/approvals?expense_id=${encodeURIComponent(expense.expense_id)}`}
+        className="ml-auto mt-1.5 flex w-fit text-xs font-semibold text-forest-700 transition-colors hover:text-forest-600"
+      >
+        Review expense
+      </Link>
     </div>
   );
 }
 
 function AIInsightsCard({ period, onPeriodChange, data, loading, error, expanded, onToggle, onGenerate }) {
-  const insights = data?.insights ?? [];
+  const insights = data?.observations ?? data?.insights ?? [];
   const warnings = data?.warnings ?? [];
-  const recommendations = data?.recommendations ?? [];
+  const recommendations = data?.suggestions ?? data?.recommendations ?? [];
   const hasResult = Boolean(data || error);
   return <Panel className="overflow-hidden">
     <div className="flex flex-col gap-3 border-b border-rule px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-      <div className="flex min-w-0 items-center gap-2.5"><span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-saffron-50 text-saffron-700 ring-1 ring-saffron-200"><Sparkles size={16} /></span><div><div className="flex items-center gap-2"><PanelTitle className="!text-base">AI Spending Summary</PanelTitle>{hasResult && <button type="button" onClick={onToggle} aria-label={expanded ? "Collapse AI spending summary" : "Expand AI spending summary"} className="rounded-sm p-1 text-ink-muted hover:bg-paper-deep">{expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>}</div><p className="mt-0.5 text-xs text-ink-muted">Gemini summarizes approved spending into observations and suggestions.</p></div></div>
-      <div className="flex items-center gap-2"><select value={period} onChange={onPeriodChange} disabled={loading} className="h-8 rounded-md border border-rule bg-paper px-2 text-xs text-ink">{AI_PERIODS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select><Button variant="secondary" size="xs" iconLeft={<Sparkles size={13} />} onClick={onGenerate} disabled={loading}>{loading ? "Analyzing..." : "Generate insights"}</Button></div>
+      <div className="flex min-w-0 items-center gap-2.5"><span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-saffron-50 text-saffron-700 ring-1 ring-saffron-200"><Sparkles size={16} /></span><div><div className="flex items-center gap-2"><PanelTitle className="!text-base">Spending Summary</PanelTitle>{hasResult && <button type="button" onClick={onToggle} aria-label={expanded ? "Collapse spending summary" : "Expand spending summary"} className="rounded-sm p-1 text-ink-muted hover:bg-paper-deep">{expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>}</div><p className="mt-0.5 text-xs text-ink-muted">A monthly overview of approved expenses, category-wise spending, and useful observations for financial review.</p></div></div>
+      <div className="flex items-center gap-2"><select value={period} onChange={onPeriodChange} disabled={loading} className="h-8 rounded-md border border-rule bg-paper px-2 text-xs text-ink">{AI_PERIODS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select><Button variant="secondary" size="xs" iconLeft={<Sparkles size={13} />} onClick={onGenerate} disabled={loading}>{loading ? "Analyzing..." : "Generate summary"}</Button></div>
     </div>
     {loading && <div className="px-5 py-3"><LoadingLine text="Analyzing approved expenses..." /></div>}
-    {!loading && expanded && <div className="px-4 py-4 sm:px-5">{error ? <p className="text-sm text-cinnabar-700">{error}</p> : !data?.enough_data ? <p className="text-sm text-ink-muted">Not enough approved expenses to generate insights.</p> : <div className="space-y-3"><p className="text-sm leading-relaxed text-ink-soft">{data.summary}</p>{insights.length > 0 && <ul className="grid gap-1 text-xs text-ink-soft sm:grid-cols-2">{insights.map((item) => <li key={item} className="flex gap-1.5"><Sparkles size={12} className="mt-0.5 shrink-0 text-saffron-600" />{item}</li>)}</ul>}<div className="grid gap-3 text-xs sm:grid-cols-2">{warnings.length > 0 && <div><p className="flex items-center gap-1.5 font-medium text-cinnabar-700"><AlertTriangle size={13} /> Warnings</p><ul className="mt-1 space-y-1 text-ink-soft">{warnings.map((item) => <li key={item}>{item}</li>)}</ul></div>}{recommendations.length > 0 && <div><p className="flex items-center gap-1.5 font-medium text-forest-700"><Lightbulb size={13} /> Recommendations</p><ul className="mt-1 space-y-1 text-ink-soft">{recommendations.map((item) => <li key={item}>{item}</li>)}</ul></div>}</div></div>}</div>}
+    {!loading && expanded && <div className="px-4 py-4 sm:px-5">{error ? <p className="text-sm text-ink-muted">{error}</p> : !data?.enough_data ? <p className="text-sm text-ink-muted">{data?.summary || "No approved spending data is available for the selected period."}</p> : <div className="space-y-3"><p className="text-sm leading-relaxed text-ink-soft">{data.summary}</p>{data?.source === "fallback" && <p className="text-[11px] font-medium text-ink-muted">Generated from approved expense records</p>}{insights.length > 0 && <ul className="grid gap-1 text-xs text-ink-soft sm:grid-cols-2">{insights.map((item) => <li key={item} className="flex gap-1.5"><Sparkles size={12} className="mt-0.5 shrink-0 text-saffron-600" />{item}</li>)}</ul>}<div className="grid gap-3 text-xs sm:grid-cols-2">{warnings.length > 0 && <div><p className="flex items-center gap-1.5 font-medium text-cinnabar-700"><AlertTriangle size={13} /> Warnings</p><ul className="mt-1 space-y-1 text-ink-soft">{warnings.map((item) => <li key={item}>{item}</li>)}</ul></div>}{recommendations.length > 0 && <div><p className="flex items-center gap-1.5 font-medium text-forest-700"><Lightbulb size={13} /> Suggestions</p><ul className="mt-1 space-y-1 text-ink-soft">{recommendations.map((item) => <li key={item}>{item}</li>)}</ul></div>}</div></div>}</div>}
   </Panel>;
 }
 
 function HowInsightsWork() {
-  return <Panel className="overflow-hidden"><header className="border-b border-rule px-4 py-2.5"><PanelTitle className="!text-sm">How this page works</PanelTitle></header><ul className="space-y-1.5 px-4 py-3 text-xs text-ink-soft"><li>Health checks use fixed budget and spending conditions.</li><li>Review signals use weighted scoring from expense patterns.</li><li>AI summary explains approved spending in simple language.</li></ul></Panel>;
+  return <Panel className="overflow-hidden"><header className="border-b border-rule px-4 py-2.5"><PanelTitle className="!text-sm">How this page works</PanelTitle></header><ul className="space-y-1.5 px-4 py-3 text-xs text-ink-soft"><li>Health checks use fixed budget and spending conditions.</li><li>Review signals use weighted scoring from expense patterns.</li><li>The summary explains approved spending in simple language.</li></ul></Panel>;
 }
 
 function InsightCardHeader({ icon: Icon, tone, title, subtitle, label }) {

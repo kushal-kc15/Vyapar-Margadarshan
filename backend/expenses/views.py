@@ -190,7 +190,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         - STAFF: Personal metrics only
         """
         user = request.user
-        today = timezone.now().date()
+        today = timezone.localdate()
         
         member = get_active_membership(user, request)
 

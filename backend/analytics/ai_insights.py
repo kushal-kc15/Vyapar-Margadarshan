@@ -40,8 +40,8 @@ def _strip_markdown_json(text):
 def generate_ai_insight(snapshot):
     api_key = str(getattr(settings, 'GEMINI_API_KEY', '') or '').strip()
     model = str(
-        getattr(settings, 'GEMINI_INSIGHTS_MODEL', '')
-        or getattr(settings, 'GEMINI_RECEIPT_MODEL', 'gemini-2.5-flash')
+        getattr(settings, 'GEMINI_INSIGHTS_MODEL', 'gemini-2.5-flash')
+        or 'gemini-2.5-flash'
     ).strip()
     if not api_key:
         raise AIInsightError('Gemini is not configured.')

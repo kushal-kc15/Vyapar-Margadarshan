@@ -1,9 +1,10 @@
 import csv
+import logging
 from datetime import date, timedelta
 from decimal import Decimal
 
 from django.http import HttpResponse
-from django.db.models import Avg, Count, Sum
+from django.db.models import Avg, Count, Q, Sum
 from django.db.models.functions import TruncDay, TruncMonth, TruncWeek
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -12,11 +13,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from budgets.models import Budget
-from .ai_insights import AIInsightError, generate_ai_insight
+from .ai_insights import generate_ai_insight
 from .rule_advisory import generate_rule_based_advice
 from .pdf_report import build_expense_report_pdf
 from expenses.models import Expense
+from receipts.models import Receipt
 from organizations.context import get_active_membership
+
+logger = logging.getLogger(__name__)
 
 PERIOD_TRUNCATORS = {
     'daily': TruncDay,
@@ -26,6 +30,7 @@ PERIOD_TRUNCATORS = {
 
 PERIOD_TYPES = {'day', 'week', 'month', 'year'}
 ANOMALY_STATUSES = {'APPROVED', 'PENDING'}
+ACTIONABLE_REVIEW_STATUSES = {'PENDING'}
 
 
 def money(value):
@@ -182,7 +187,7 @@ def scoped_anomaly_expenses(request):
 
 
 def current_and_previous_period(period_type):
-    today = timezone.now().date()
+    today = timezone.localdate()
     if period_type == 'day':
         current_start = today
         current_end = today
@@ -207,7 +212,7 @@ def current_and_previous_period(period_type):
 
 
 def budget_bounds(budget):
-    today = timezone.now().date()
+    today = timezone.localdate()
     if budget.start_date and budget.end_date:
         return budget.start_date, budget.end_date
     if budget.period == 'DAILY':
@@ -226,7 +231,7 @@ def budget_bounds(budget):
 
 
 def ai_insight_period_bounds(period):
-    today = timezone.now().date()
+    today = timezone.localdate()
     current_start = today.replace(day=1)
     if period == 'this_month':
         return current_start, today
@@ -250,9 +255,9 @@ def period_change(current_total, previous_total):
 
 
 def severity_from_score(score):
-    if score >= 80:
+    if score >= 66:
         return 'HIGH'
-    if score >= 50:
+    if score >= 31:
         return 'MEDIUM'
     return 'LOW'
 
@@ -276,7 +281,7 @@ def build_expense_snapshot(expense):
 def top_category_rows(queryset, limit=5):
     return [
         {
-            'category': row['category'],
+            'category': category_label(row['category']),
             'total': money(row['total']),
             'count': row['count'],
         }
@@ -339,15 +344,17 @@ def build_ai_insight_snapshot(request):
 def fallback_ai_insight(snapshot):
     top_category = snapshot['top_categories'][0] if snapshot['top_categories'] else None
     top_vendor = snapshot['top_vendors'][0] if snapshot['top_vendors'] else None
+    category_text = f" The highest spending category is {top_category['category']}." if top_category else ''
+    vendor_text = f" The highest spending vendor is {top_vendor['vendor']}." if top_vendor else ''
     summary = (
-        f"Approved spend for this period is {snapshot['total_approved_amount']} across "
-        f"{snapshot['expense_count']} expenses."
+        f"This period includes {snapshot['expense_count']} approved expenses with total "
+        f"spending of NPR {snapshot['total_approved_amount']:,.2f}.{category_text}{vendor_text}"
     )
     insights = []
     if top_category:
-        insights.append(f"{top_category['category']} is the largest category at {top_category['total']}.")
+        insights.append(f"Most approved spending is concentrated in {top_category['category']}.")
     if top_vendor:
-        insights.append(f"{top_vendor['vendor']} is the top vendor at {top_vendor['total']}.")
+        insights.append(f"{top_vendor['vendor']} has the highest approved vendor total for this period.")
     if snapshot['highest_expenses']:
         highest = snapshot['highest_expenses'][0]
         insights.append(f"The highest expense is {highest['title']} at {highest['amount']}.")
@@ -359,8 +366,8 @@ def fallback_ai_insight(snapshot):
             warnings.append(f"{top_category['category']} represents {round(category_share)}% of approved spend.")
 
     recommendations = [
-        'Review the highest category before approving new discretionary spending.',
-        'Compare top vendors for consolidation or negotiated pricing opportunities.',
+        'Review high-value expenses before the end of the month.',
+        'Compare category-wise spending with the allocated budget.',
     ]
 
     return {
@@ -418,6 +425,44 @@ def is_new_vendor(base_queryset, expense):
     ).exclude(id=expense.id).exists()
 
 
+def expense_budget_pressure(expense):
+    budgets = Budget.objects.filter(
+        organization=expense.organization,
+        is_active=True,
+        start_date__lte=expense.date,
+        end_date__gte=expense.date,
+    ).filter(Q(category='ALL') | Q(category=expense.category))
+
+    highest_percentage = 0
+    for budget in budgets:
+        approved_total = Expense.objects.filter(
+            organization=expense.organization,
+            status='APPROVED',
+            date__gte=budget.start_date,
+            date__lte=budget.end_date,
+        )
+        if budget.category != 'ALL':
+            approved_total = approved_total.filter(category=budget.category)
+        spent = approved_total.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        projected_spend = spent + expense.amount
+        percentage = float((projected_spend / budget.amount) * Decimal('100')) if budget.amount else 0
+        highest_percentage = max(highest_percentage, percentage)
+    return round(highest_percentage, 1)
+
+
+def review_suggestion(reason_codes):
+    codes = set(reason_codes)
+    if {'MISSING_RECEIPT', 'DUPLICATE_CANDIDATE'} & codes:
+        return 'Verify the receipt and confirm the expense details before approval.'
+    if {'BUDGET_EXCEEDED', 'BUDGET_PRESSURE'} & codes:
+        return 'Compare this expense with the available category budget before approval.'
+    if {'HIGH_CATEGORY_AMOUNT', 'HIGH_VENDOR_AMOUNT', 'HIGH_AMOUNT'} & codes:
+        return 'Confirm the amount and business purpose before approval.'
+    if {'MISSING_VENDOR', 'WEAK_DESCRIPTION'} & codes:
+        return 'Request complete vendor and business-purpose details before approval.'
+    return 'Review the expense details and supporting record before approval.'
+
+
 def detect_expense_anomalies(expense, base_queryset, *, amount_multiplier, minimum_baseline_count, duplicate_window_days):
     reasons = []
     score = 0
@@ -427,7 +472,7 @@ def detect_expense_anomalies(expense, base_queryset, *, amount_multiplier, minim
         average = Decimal(str(category_stats['avg']))
         ratio = expense.amount / average if average > 0 else Decimal('0')
         if ratio >= amount_multiplier:
-            score += min(45, int(float(ratio) * 10))
+            score += 25
             reasons.append({
                 'code': 'HIGH_CATEGORY_AMOUNT',
                 'message': 'Amount is unusually high for this category.',
@@ -441,7 +486,7 @@ def detect_expense_anomalies(expense, base_queryset, *, amount_multiplier, minim
         average = Decimal(str(vendor_stats['avg']))
         ratio = expense.amount / average if average > 0 else Decimal('0')
         if ratio >= amount_multiplier:
-            score += min(35, int(float(ratio) * 8))
+            score += 15
             reasons.append({
                 'code': 'HIGH_VENDOR_AMOUNT',
                 'message': 'Amount is unusually high for this vendor.',
@@ -450,38 +495,91 @@ def detect_expense_anomalies(expense, base_queryset, *, amount_multiplier, minim
                 'ratio': round(float(ratio), 2),
             })
 
+    if not category_stats:
+        if expense.amount >= Decimal('25000'):
+            score += 25
+            reasons.append({'code': 'HIGH_AMOUNT', 'message': 'Amount is high and should be verified before approval.'})
+        elif expense.amount >= Decimal('10000'):
+            score += 15
+            reasons.append({'code': 'HIGH_AMOUNT', 'message': 'Amount is above the normal review threshold.'})
+        elif expense.amount >= Decimal('5000'):
+            score += 8
+            reasons.append({'code': 'HIGH_AMOUNT', 'message': 'Amount warrants a routine value check.'})
+
     duplicates = duplicate_candidates(base_queryset, expense, duplicate_window_days)
     if duplicates:
-        score += 35
+        score += 20
         reasons.append({
             'code': 'DUPLICATE_CANDIDATE',
             'message': 'Similar expense exists near the same date.',
             'matching_expense_ids': [candidate.id for candidate in duplicates],
         })
 
-    if is_new_vendor(base_queryset, expense):
-        score += 15
+    if not str(expense.vendor or '').strip() or str(expense.vendor or '').strip().lower() in {'unknown', 'n/a', 'na'}:
+        score += 10
+        reasons.append({
+            'code': 'MISSING_VENDOR',
+            'message': 'Vendor information is missing or unclear.',
+        })
+    elif is_new_vendor(base_queryset, expense):
+        score += 5
         reasons.append({
             'code': 'NEW_VENDOR',
             'message': 'Vendor has no prior spend history in this scope.',
         })
 
-    if expense.date.weekday() >= 5:
-        score += 10
+    if not Receipt.objects.filter(expense_id=expense.id).exists():
+        score += 20
         reasons.append({
-            'code': 'WEEKEND_EXPENSE',
-            'message': 'Expense date falls on a weekend.',
+            'code': 'MISSING_RECEIPT',
+            'message': 'No receipt is attached to this expense.',
         })
 
-    if not reasons:
-        return None
+    if len(str(expense.description or '').strip()) < 15:
+        score += 10
+        reasons.append({
+            'code': 'WEAK_DESCRIPTION',
+            'message': 'The business-purpose description is missing or too short.',
+        })
+
+    budget_percentage = expense_budget_pressure(expense)
+    if budget_percentage >= 100:
+        score += 25
+        reasons.append({
+            'code': 'BUDGET_EXCEEDED',
+            'message': 'This expense would take the applicable budget over its limit.',
+            'percentage': budget_percentage,
+        })
+    elif budget_percentage >= 80:
+        score += 15
+        reasons.append({
+            'code': 'BUDGET_PRESSURE',
+            'message': 'This expense would use at least 80% of the applicable budget.',
+            'percentage': budget_percentage,
+        })
+
+    pending_days = max(0, (timezone.localdate() - expense.date).days)
+    if pending_days > 7:
+        score += 10
+        reasons.append({
+            'code': 'OLD_PENDING_EXPENSE',
+            'message': f'Expense has been waiting for review for {pending_days} days.',
+            'pending_days': pending_days,
+        })
 
     score = min(score, 100)
+    risk_level = severity_from_score(score)
+    reason_codes = [reason['code'] for reason in reasons]
     return {
         **build_expense_snapshot(expense),
         'score': score,
-        'severity': severity_from_score(score),
+        'risk_score': score,
+        'severity': risk_level,
+        'risk_level': risk_level.title(),
         'reasons': reasons,
+        'review_reasons': [reason['message'] for reason in reasons],
+        'review_suggestion': review_suggestion(reason_codes),
+        'source': 'rules',
     }
 
 
@@ -778,7 +876,7 @@ def vendor_summary(request):
 @permission_classes([IsAuthenticated])
 def budget_burn_rate(request):
     member = get_member_or_error(request)
-    today = timezone.now().date()
+    today = timezone.localdate()
     budgets = Budget.objects.filter(
         organization=member.organization,
         is_active=True,
@@ -996,11 +1094,14 @@ def ai_insights(request):
             'end_date': snapshot['end_date'],
             'enough_data': False,
             'generated_by_ai': False,
-            'summary': '',
+            'summary': 'No approved spending data is available for the selected period.',
             'insights': [],
+            'observations': [],
             'warnings': [],
             'recommendations': [],
+            'suggestions': [],
             'provider': 'none',
+            'source': 'none',
             'model': '',
             'snapshot_metrics': {
                 'total_approved_amount': 0,
@@ -1011,7 +1112,8 @@ def ai_insights(request):
     generated_by_ai = True
     try:
         insight = generate_ai_insight(snapshot)
-    except AIInsightError:
+    except Exception:
+        logger.exception('Spending summary provider failed; using database fallback')
         generated_by_ai = False
         insight = fallback_ai_insight(snapshot)
 
@@ -1025,9 +1127,12 @@ def ai_insights(request):
         'generated_by_ai': generated_by_ai,
         'summary': insight['summary'],
         'insights': insight['insights'],
+        'observations': insight['insights'],
         'warnings': insight['warnings'],
         'recommendations': insight['recommendations'],
+        'suggestions': insight['recommendations'],
         'provider': insight['provider'],
+        'source': insight['provider'],
         'model': insight['model'],
         'snapshot_metrics': {
             'total_approved_amount': snapshot['total_approved_amount'],
@@ -1053,10 +1158,13 @@ def anomalies(request):
     if amount_multiplier <= 1:
         raise ValidationError({'amount_multiplier': 'Use a number greater than 1.'})
 
-    today = timezone.now().date()
+    today = timezone.localdate()
     cutoff = today - timedelta(days=lookback_days)
     base_queryset = expenses.filter(date__gte=cutoff, date__lte=today)
-    candidate_queryset, start_date, end_date = apply_date_filters(base_queryset, request)
+    candidate_queryset, start_date, end_date = apply_date_filters(
+        base_queryset.filter(status__in=ACTIONABLE_REVIEW_STATUSES),
+        request,
+    )
     candidates = candidate_queryset.order_by('-date', '-created_at')[:limit * 3]
 
     flagged = []

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Check } from 'lucide-react';
+import { Bell, Check, Trash2 } from 'lucide-react';
 import api from '../lib/api.js';
 import { formatDate } from '../lib/date.js';
 import { cn } from '../lib/utils.js';
@@ -35,6 +35,7 @@ export function NotificationBell() {
   const [error, setError] = useState('');
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [markAllLoading, setMarkAllLoading] = useState(false);
+  const [clearAllLoading, setClearAllLoading] = useState(false);
 
   // Load unread count with polling
   useEffect(() => {
@@ -180,6 +181,22 @@ export function NotificationBell() {
     }
   };
 
+  const clearAll = async () => {
+    if (clearAllLoading || notifications.length === 0) return;
+    setClearAllLoading(true);
+    setError('');
+
+    try {
+      await api.delete('/notifications/clear_all/');
+      setNotifications([]);
+      setUnreadCount(0);
+    } catch {
+      if (mounted.current) setError('Could not clear notifications.');
+    } finally {
+      if (mounted.current) setClearAllLoading(false);
+    }
+  };
+
   return (
     <div className="relative" ref={ref}>
       <button
@@ -205,15 +222,26 @@ export function NotificationBell() {
               <p className="text-sm font-medium text-ink">Notifications</p>
               <p className="text-xs text-ink-muted">{unreadCount} unread</p>
             </div>
-            <button
-              type="button"
-              onClick={markAllRead}
-              disabled={markAllLoading || unreadCount === 0}
-              className="inline-flex items-center gap-1 text-xs font-medium text-ink-soft hover:text-ink disabled:text-ink-faint disabled:cursor-not-allowed transition-colors"
-            >
-              {markAllLoading ? <Spinner size={12} /> : <Check size={13} strokeWidth={1.5} />}
-              Mark all read
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={markAllRead}
+                disabled={markAllLoading || clearAllLoading || unreadCount === 0}
+                className="inline-flex items-center gap-1 text-xs font-medium text-ink-soft hover:text-ink disabled:text-ink-faint disabled:cursor-not-allowed transition-colors"
+              >
+                {markAllLoading ? <Spinner size={12} /> : <Check size={13} strokeWidth={1.5} />}
+                Mark all read
+              </button>
+              <button
+                type="button"
+                onClick={clearAll}
+                disabled={clearAllLoading || markAllLoading || notifications.length === 0}
+                className="inline-flex items-center gap-1 text-xs font-medium text-cinnabar-600 hover:text-cinnabar-700 disabled:text-ink-faint disabled:cursor-not-allowed transition-colors"
+              >
+                {clearAllLoading ? <Spinner size={12} /> : <Trash2 size={13} strokeWidth={1.5} />}
+                Clear all
+              </button>
+            </div>
           </div>
 
           <div className="max-h-[28rem] overflow-y-auto">

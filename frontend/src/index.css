@@ -86,6 +86,50 @@
   --color-cinnabar-700: 244 161 141;
 }
 
+/* The public landing page intentionally keeps its light editorial palette,
+   regardless of the theme selected for the authenticated application. */
+.landing-light {
+  color-scheme: light;
+
+  --color-paper: 251 250 247;
+  --color-paper-deep: 243 241 234;
+  --color-paper-edge: 236 232 222;
+
+  --color-ink: 28 26 23;
+  --color-ink-soft: 61 58 53;
+  --color-ink-muted: 100 95 88;
+  --color-ink-faint: 163 158 149;
+
+  --color-rule: 227 221 208;
+  --color-rule-strong: 203 195 177;
+
+  --color-forest-50: 230 240 234;
+  --color-forest-100: 201 221 208;
+  --color-forest-200: 164 199 174;
+  --color-forest-500: 63 114 89;
+  --color-forest-600: 52 94 72;
+  --color-forest-700: 40 74 57;
+
+  --color-moss-50: 235 242 232;
+  --color-moss-200: 196 214 187;
+  --color-moss-500: 90 122 74;
+  --color-moss-600: 73 103 59;
+  --color-moss-700: 62 86 50;
+
+  --color-saffron-50: 251 242 224;
+  --color-saffron-200: 239 207 151;
+  --color-saffron-500: 201 140 43;
+  --color-saffron-600: 169 111 30;
+  --color-saffron-700: 141 94 21;
+
+  --color-cinnabar-50: 251 238 234;
+  --color-cinnabar-200: 241 195 183;
+  --color-cinnabar-300: 232 153 135;
+  --color-cinnabar-500: 194 65 42;
+  --color-cinnabar-600: 168 51 31;
+  --color-cinnabar-700: 138 41 26;
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;
