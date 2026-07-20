@@ -494,7 +494,6 @@ def detect_expense_anomalies(expense, base_queryset, *, amount_multiplier, minim
                 'baseline_count': vendor_stats['count'],
                 'ratio': round(float(ratio), 2),
             })
-
     if not category_stats:
         if expense.amount >= Decimal('25000'):
             score += 25
@@ -581,7 +580,6 @@ def detect_expense_anomalies(expense, base_queryset, *, amount_multiplier, minim
         'review_suggestion': review_suggestion(reason_codes),
         'source': 'rules',
     }
-
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
