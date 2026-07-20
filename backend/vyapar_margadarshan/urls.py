@@ -6,9 +6,16 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 
+from .health import health_check, root
+
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path('', root, name='api-root'),
     
+    path('admin/', admin.site.urls),
+
+    # Health check endpoint (used by uptime/load balancer checks)
+    path('health/', health_check, name='health-check'),
+
     # Authentication endpoints
     path('api/auth/', include('users.urls')),
     

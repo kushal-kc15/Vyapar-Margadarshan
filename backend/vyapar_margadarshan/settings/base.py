@@ -10,6 +10,7 @@ from decouple import config
 from corsheaders.defaults import default_headers
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = BASE_DIR.parent
 
 INSECURE_SECRET_KEY = 'django-insecure-dev-key-change-in-production'
 
@@ -33,9 +34,23 @@ def config_bool(name, default=False):
 
 
 def config_list(name, default=''):
-    """Read a comma-separated env value into a cleaned list."""
-    value = config(name, default=default)
-    return [item.strip() for item in str(value).split(',') if item.strip()]
+    """
+    Read a comma-separated env value into a cleaned list.
+
+    Tolerates accidental bracket/quote wrapping (e.g. someone pastes
+    `["a", "b"]` instead of `a,b`) so a malformed .env value degrades
+    gracefully instead of producing one bad entry like `[`.
+    """
+    value = str(config(name, default=default)).strip()
+    if value.startswith('[') and value.endswith(']'):
+        value = value[1:-1]
+
+    items = []
+    for item in value.split(','):
+        cleaned = item.strip().strip('"').strip("'").strip()
+        if cleaned:
+            items.append(cleaned)
+    return items
 
 
 def database_config_from_url(database_url):
@@ -248,7 +263,7 @@ STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 STATICFILES_DIRS = [
-    BASE_DIR.parent.parent / 'frontend' / 'dist' / 'assets',
+    PROJECT_ROOT / 'frontend' / 'dist',
 ]
 # Media files
 MEDIA_URL = 'media/'

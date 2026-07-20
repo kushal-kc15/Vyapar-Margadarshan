@@ -21,6 +21,11 @@ if not ALLOWED_HOSTS:
 if not CORS_ALLOWED_ORIGINS:
     raise ImproperlyConfigured('Set CORS_ALLOWED_ORIGINS in production.')
 
+CSRF_TRUSTED_ORIGINS = config_list('CSRF_TRUSTED_ORIGINS', default='')
+
+if not CSRF_TRUSTED_ORIGINS:
+    raise ImproperlyConfigured('Set CSRF_TRUSTED_ORIGINS in production.')
+
 SECURE_SSL_REDIRECT = config_bool('SECURE_SSL_REDIRECT', default=True)
 SESSION_COOKIE_SECURE = config_bool('SESSION_COOKIE_SECURE', default=True)
 CSRF_COOKIE_SECURE = config_bool('CSRF_COOKIE_SECURE', default=True)
@@ -30,20 +35,22 @@ SECURE_HSTS_PRELOAD = config_bool('SECURE_HSTS_PRELOAD', default=True)
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
 
-CSRF_TRUSTED_ORIGINS = config_list('CSRF_TRUSTED_ORIGINS', default='')
-
+# Structured, minimal console logging.
+# Uses one line per record with timestamp/level/logger/message so it is
+# easy to parse from journalctl / a process manager's log capture without
+# introducing file handlers, rotation, or external services.
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
-        'standard': {
-            'format': '%(asctime)s %(levelname)s %(name)s %(message)s',
+        'structured': {
+            'format': '%(asctime)s level=%(levelname)s logger=%(name)s message=%(message)s',
         },
     },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'formatter': 'standard',
+            'formatter': 'structured',
         },
     },
     'root': {
@@ -51,7 +58,17 @@ LOGGING = {
         'level': config('LOG_LEVEL', default='INFO'),
     },
     'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': config('LOG_LEVEL', default='INFO'),
+            'propagate': False,
+        },
         'django.security': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'django.request': {
             'handlers': ['console'],
             'level': 'WARNING',
             'propagate': False,
