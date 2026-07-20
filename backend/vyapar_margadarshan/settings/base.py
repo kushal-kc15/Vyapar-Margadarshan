@@ -206,7 +206,7 @@ ROOT_URLCONF = 'vyapar_margadarshan.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'],
+        'DIRS': [BASE_DIR.parent.parent / 'frontend' / 'dist'],
         'APP_DIRS': True,
         'OPTIONS': {
             'libraries': {
@@ -247,7 +247,9 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
-
+STATICFILES_DIRS = [
+    BASE_DIR.parent.parent / 'frontend' / 'dist' / 'assets',
+]
 # Media files
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
