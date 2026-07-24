@@ -3,9 +3,11 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.db.models import Count, Sum
+from django.utils import timezone
 
 from budgets.models import Budget
 from expenses.models import Expense
+from receipts.models import Receipt
 
 
 ZERO = Decimal('0')
@@ -175,6 +177,54 @@ def generate_rule_based_advice(organization, user, start_date, end_date, role):
                     'previous_end_date': previous_end.isoformat(),
                 },
             ))
+
+    # Receipt compliance: flag when missing-receipt rate is above 20%
+    if approved_count >= 5:
+        receipt_count = Receipt.objects.filter(
+            expense__organization=organization,
+            expense__status='APPROVED',
+            expense__date__gte=start_date,
+            expense__date__lte=end_date,
+        ).count()
+        missing_receipts = approved_count - receipt_count
+        missing_rate = _percentage(missing_receipts, approved_count)
+        if missing_rate >= Decimal('20'):
+            advisories.append(_advisory(
+                'RECEIPT_COMPLIANCE',
+                'warning',
+                'Receipt compliance needs attention',
+                f"{missing_rate}% of approved expenses have no receipt attached.",
+                'Remind submitters to attach receipts before requesting approval.',
+                {
+                    'missing_count': missing_receipts,
+                    'total_count': approved_count,
+                    'missing_rate': float(missing_rate),
+                },
+            ))
+
+    # Approval bottleneck: flag when pending expenses are stacking up
+    pending_expenses = Expense.objects.filter(
+        organization=organization,
+        status='PENDING',
+    )
+    if str(role or '').upper() != 'OWNER':
+        pending_expenses = pending_expenses.filter(user=user)
+    pending_count = pending_expenses.count()
+    if pending_count >= 5:
+        today = timezone.localdate()
+        total_days = sum((today - e.date).days for e in pending_expenses.only('date'))
+        avg_days = round(total_days / pending_count, 1) if pending_count else 0
+        advisories.append(_advisory(
+            'APPROVAL_BOTTLENECK',
+            'warning' if pending_count < 10 else 'danger',
+            'Pending expenses are accumulating',
+            f"{pending_count} expenses are waiting for review (avg. {avg_days} days).",
+            'Prioritize reviewing the oldest pending expenses to avoid delays.',
+            {
+                'pending_count': pending_count,
+                'average_pending_days': avg_days,
+            },
+        ))
 
     severity_order = {'danger': 0, 'warning': 1, 'info': 2, 'success': 3}
     advisories.sort(key=lambda item: (severity_order[item['severity']], item['code'], item['title']))

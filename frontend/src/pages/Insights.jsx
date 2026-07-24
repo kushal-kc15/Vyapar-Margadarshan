@@ -360,10 +360,19 @@ const ANOMALY_TONES = {
   MEDIUM: "bg-saffron-50 text-saffron-700 ring-saffron-200",
   LOW: "bg-forest-50 text-forest-700 ring-forest-200",
 };
+const SEVERITY_TONES = {
+  HIGH: "border-cinnabar-200 bg-cinnabar-50 text-cinnabar-700",
+  MEDIUM: "border-saffron-200 bg-saffron-50 text-saffron-700",
+  LOW: "border-forest-200 bg-forest-50 text-forest-700",
+};
 const REASON_LABELS = {
   HIGH_CATEGORY_AMOUNT: "Higher than usual category spending",
   HIGH_VENDOR_AMOUNT: "Higher than usual vendor spending",
   HIGH_AMOUNT: "High-value expense",
+  HIGH_AMOUNT_CRITICAL: "High-value expense (critical)",
+  HIGH_AMOUNT_ELEVATED: "High-value expense (elevated)",
+  HIGH_AMOUNT_ROUTINE: "High-value expense (routine check)",
+  CATEGORY_OUTLIER: "Statistical outlier for this category",
   DUPLICATE_CANDIDATE: "Possible duplicate",
   NEW_VENDOR: "New vendor",
   MISSING_RECEIPT: "No receipt attached",
@@ -393,9 +402,13 @@ function UnusualExpenseCard({ data, loading, error, currency }) {
 
 function AnomalyItem({ expense, currency }) {
   const [expanded, setExpanded] = useState(false);
+  const triggeredRules = expense.triggered_rules ?? [];
   const reasons = expense.reasons ?? [];
-  const firstReason = reasons[0];
-  const extraCount = Math.max(0, reasons.length - 1);
+  const displayRules = triggeredRules.length > 0 ? triggeredRules : reasons;
+  const riskScore = expense.risk_score ?? expense.score ?? 0;
+  const firstRule = displayRules[0];
+  const extraCount = Math.max(0, displayRules.length - 1);
+
   return (
     <div className="min-w-0">
       <div className="flex items-start justify-between gap-2">
@@ -405,18 +418,42 @@ function AnomalyItem({ expense, currency }) {
         </div>
         <Money value={expense.amount} currency={currency} className="shrink-0 text-xs font-semibold" />
       </div>
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
+
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
         <span className={`rounded-sm px-1.5 py-0.5 text-[11px] font-semibold ring-1 ${ANOMALY_TONES[expense.severity] ?? ANOMALY_TONES.LOW}`}>{expense.severity}</span>
-        <span className="num rounded-sm bg-paper-deep px-1.5 py-0.5 text-[11px] text-ink-soft">Review score {expense.risk_score ?? expense.score}/100</span>
+        <RiskScoreBar score={riskScore} />
         <span className="rounded-sm bg-paper-deep px-1.5 py-0.5 text-[11px] capitalize text-ink-muted">{String(expense.status || "").toLowerCase()}</span>
       </div>
-      {firstReason && (
+
+      {firstRule && (
         <div className="mt-1.5 text-[11px] text-ink-muted">
-          <span className="block min-w-0 truncate">{REASON_LABELS[firstReason.code] ?? firstReason.message}{extraCount > 0 ? ` +${extraCount} more` : ""}</span>
-          {extraCount > 0 && <button type="button" onClick={() => setExpanded((value) => !value)} className="mt-1 block font-medium text-forest-700 hover:text-forest-600">{expanded ? "Hide details" : "Details"}</button>}
+          <span className="block min-w-0 truncate">{REASON_LABELS[firstRule.code] ?? firstRule.message}{extraCount > 0 ? ` +${extraCount} more` : ""}</span>
+          {extraCount > 0 && <button type="button" onClick={() => setExpanded((value) => !value)} className="mt-1 block font-medium text-forest-700 hover:text-forest-600">{expanded ? "Hide breakdown" : "Score breakdown"}</button>}
         </div>
       )}
-      {expanded && <ul className="mt-1 space-y-0.5 text-[11px] text-ink-muted">{reasons.slice(1).map((reason) => <li key={reason.code}>• {REASON_LABELS[reason.code] ?? reason.message}</li>)}</ul>}
+
+      {expanded && (
+        <div className="mt-2 space-y-2 border-t border-rule pt-2">
+          <ul className="space-y-1.5">
+            {displayRules.map((rule) => (
+              <li key={rule.code} className="flex items-start gap-1.5 text-[11px]">
+                <span className={`mt-0.5 shrink-0 rounded-sm border px-1 py-px font-semibold tabular-nums ${SEVERITY_TONES[rule.severity] ?? SEVERITY_TONES.LOW}`}>+{rule.score}</span>
+                <div className="min-w-0">
+                  <span className="font-medium text-ink">{rule.name ?? REASON_LABELS[rule.code] ?? rule.code}</span>
+                  <span className="ml-1 text-ink-muted">{rule.message}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {expense.recommendations?.length > 0 && (
+            <div className="rounded-sm border border-forest-200 bg-forest-50 px-2 py-1.5">
+              <p className="flex items-center gap-1 text-[11px] font-medium text-forest-700"><Lightbulb size={11} /> Recommendation</p>
+              <p className="mt-0.5 text-[11px] leading-snug text-forest-700/80">{expense.recommendations[0]}</p>
+            </div>
+          )}
+        </div>
+      )}
+
       <Link
         to={`/approvals?expense_id=${encodeURIComponent(expense.expense_id)}`}
         className="ml-auto mt-1.5 flex w-fit text-xs font-semibold text-forest-700 transition-colors hover:text-forest-600"
@@ -424,6 +461,19 @@ function AnomalyItem({ expense, currency }) {
         Review expense
       </Link>
     </div>
+  );
+}
+
+function RiskScoreBar({ score }) {
+  const pct = Math.min(100, Math.max(0, score));
+  const tone = pct >= 66 ? "bg-cinnabar-500" : pct >= 31 ? "bg-saffron-500" : "bg-forest-500";
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-sm bg-paper-deep px-1.5 py-0.5">
+      <span className="relative h-1.5 w-10 overflow-hidden rounded-full bg-rule">
+        <span className={`absolute inset-y-0 left-0 rounded-full ${tone}`} style={{ width: `${pct}%` }} />
+      </span>
+      <span className="num text-[11px] text-ink-soft">{score}/100</span>
+    </span>
   );
 }
 

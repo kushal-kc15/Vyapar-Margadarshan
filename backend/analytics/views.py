@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.http import HttpResponse
-from django.db.models import Avg, Count, Q, Sum
+from django.db.models import Avg, Count, Sum
 from django.db.models.functions import TruncDay, TruncMonth, TruncWeek
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -15,6 +15,9 @@ from rest_framework.response import Response
 from budgets.models import Budget
 from .ai_insights import generate_ai_insight
 from .rule_advisory import generate_rule_based_advice
+from .rule_context import build_context
+from .rule_engine import evaluate_expense
+from .rule_knowledge_base import EXPENSE_REVIEW_RULES, RULE_CATEGORIES
 from .pdf_report import build_expense_report_pdf
 from expenses.models import Expense
 from receipts.models import Receipt
@@ -254,14 +257,6 @@ def period_change(current_total, previous_total):
     return 0 if current_total == 0 else 100
 
 
-def severity_from_score(score):
-    if score >= 66:
-        return 'HIGH'
-    if score >= 31:
-        return 'MEDIUM'
-    return 'LOW'
-
-
 def build_expense_snapshot(expense):
     return {
         'expense_id': expense.id,
@@ -380,204 +375,44 @@ def fallback_ai_insight(snapshot):
     }
 
 
-def category_baseline(base_queryset, expense, minimum_count):
-    baseline = base_queryset.filter(
-        category=expense.category,
-        date__lt=expense.date,
-    ).exclude(id=expense.id).aggregate(avg=Avg('amount'), count=Count('id'))
-    if (baseline['count'] or 0) < minimum_count or not baseline['avg']:
-        return None
-    return baseline
-
-
-def vendor_baseline(base_queryset, expense, minimum_count):
-    if not expense.vendor:
-        return None
-    baseline = base_queryset.filter(
-        vendor__iexact=expense.vendor,
-        date__lt=expense.date,
-    ).exclude(id=expense.id).aggregate(avg=Avg('amount'), count=Count('id'))
-    if (baseline['count'] or 0) < minimum_count or not baseline['avg']:
-        return None
-    return baseline
-
-
-def duplicate_candidates(base_queryset, expense, window_days):
-    start = expense.date - timedelta(days=window_days)
-    end = expense.date + timedelta(days=window_days)
-    queryset = base_queryset.filter(
-        amount=expense.amount,
-        category=expense.category,
-        date__gte=start,
-        date__lte=end,
-    ).exclude(id=expense.id)
-    if expense.vendor:
-        queryset = queryset.filter(vendor__iexact=expense.vendor)
-    return list(queryset.order_by('-date', '-created_at')[:5])
-
-
-def is_new_vendor(base_queryset, expense):
-    if not expense.vendor:
-        return False
-    return not base_queryset.filter(
-        vendor__iexact=expense.vendor,
-        date__lt=expense.date,
-    ).exclude(id=expense.id).exists()
-
-
-def expense_budget_pressure(expense):
-    budgets = Budget.objects.filter(
-        organization=expense.organization,
-        is_active=True,
-        start_date__lte=expense.date,
-        end_date__gte=expense.date,
-    ).filter(Q(category='ALL') | Q(category=expense.category))
-
-    highest_percentage = 0
-    for budget in budgets:
-        approved_total = Expense.objects.filter(
-            organization=expense.organization,
-            status='APPROVED',
-            date__gte=budget.start_date,
-            date__lte=budget.end_date,
-        )
-        if budget.category != 'ALL':
-            approved_total = approved_total.filter(category=budget.category)
-        spent = approved_total.aggregate(total=Sum('amount'))['total'] or Decimal('0')
-        projected_spend = spent + expense.amount
-        percentage = float((projected_spend / budget.amount) * Decimal('100')) if budget.amount else 0
-        highest_percentage = max(highest_percentage, percentage)
-    return round(highest_percentage, 1)
-
-
-def review_suggestion(reason_codes):
-    codes = set(reason_codes)
-    if {'MISSING_RECEIPT', 'DUPLICATE_CANDIDATE'} & codes:
-        return 'Verify the receipt and confirm the expense details before approval.'
-    if {'BUDGET_EXCEEDED', 'BUDGET_PRESSURE'} & codes:
-        return 'Compare this expense with the available category budget before approval.'
-    if {'HIGH_CATEGORY_AMOUNT', 'HIGH_VENDOR_AMOUNT', 'HIGH_AMOUNT'} & codes:
-        return 'Confirm the amount and business purpose before approval.'
-    if {'MISSING_VENDOR', 'WEAK_DESCRIPTION'} & codes:
-        return 'Request complete vendor and business-purpose details before approval.'
-    return 'Review the expense details and supporting record before approval.'
-
-
 def detect_expense_anomalies(expense, base_queryset, *, amount_multiplier, minimum_baseline_count, duplicate_window_days):
+    """Evaluate a single expense using the rule engine.
+
+    This is a thin adapter that builds context, runs the engine, and merges
+    the result with an expense snapshot for the API response.
+    """
+    context = build_context(
+        expense,
+        base_queryset,
+        amount_multiplier=amount_multiplier,
+        minimum_baseline_count=minimum_baseline_count,
+        duplicate_window_days=duplicate_window_days,
+    )
+    result = evaluate_expense(expense, context)
+
+    # Map triggered_rules back to the legacy 'reasons' format for API compat
     reasons = []
-    score = 0
+    for rule in result['triggered_rules']:
+        reason = {'code': rule['code'], 'message': rule['message']}
+        for key in ('baseline_average', 'baseline_count', 'ratio',
+                    'matching_expense_ids', 'percentage', 'pending_days', 'amount'):
+            if key in rule:
+                reason[key] = rule[key]
+        reasons.append(reason)
 
-    category_stats = category_baseline(base_queryset, expense, minimum_baseline_count)
-    if category_stats:
-        average = Decimal(str(category_stats['avg']))
-        ratio = expense.amount / average if average > 0 else Decimal('0')
-        if ratio >= amount_multiplier:
-            score += 25
-            reasons.append({
-                'code': 'HIGH_CATEGORY_AMOUNT',
-                'message': 'Amount is unusually high for this category.',
-                'baseline_average': money(average),
-                'baseline_count': category_stats['count'],
-                'ratio': round(float(ratio), 2),
-            })
-
-    vendor_stats = vendor_baseline(base_queryset, expense, minimum_baseline_count)
-    if vendor_stats:
-        average = Decimal(str(vendor_stats['avg']))
-        ratio = expense.amount / average if average > 0 else Decimal('0')
-        if ratio >= amount_multiplier:
-            score += 15
-            reasons.append({
-                'code': 'HIGH_VENDOR_AMOUNT',
-                'message': 'Amount is unusually high for this vendor.',
-                'baseline_average': money(average),
-                'baseline_count': vendor_stats['count'],
-                'ratio': round(float(ratio), 2),
-            })
-    if not category_stats:
-        if expense.amount >= Decimal('25000'):
-            score += 25
-            reasons.append({'code': 'HIGH_AMOUNT', 'message': 'Amount is high and should be verified before approval.'})
-        elif expense.amount >= Decimal('10000'):
-            score += 15
-            reasons.append({'code': 'HIGH_AMOUNT', 'message': 'Amount is above the normal review threshold.'})
-        elif expense.amount >= Decimal('5000'):
-            score += 8
-            reasons.append({'code': 'HIGH_AMOUNT', 'message': 'Amount warrants a routine value check.'})
-
-    duplicates = duplicate_candidates(base_queryset, expense, duplicate_window_days)
-    if duplicates:
-        score += 20
-        reasons.append({
-            'code': 'DUPLICATE_CANDIDATE',
-            'message': 'Similar expense exists near the same date.',
-            'matching_expense_ids': [candidate.id for candidate in duplicates],
-        })
-
-    if not str(expense.vendor or '').strip() or str(expense.vendor or '').strip().lower() in {'unknown', 'n/a', 'na'}:
-        score += 10
-        reasons.append({
-            'code': 'MISSING_VENDOR',
-            'message': 'Vendor information is missing or unclear.',
-        })
-    elif is_new_vendor(base_queryset, expense):
-        score += 5
-        reasons.append({
-            'code': 'NEW_VENDOR',
-            'message': 'Vendor has no prior spend history in this scope.',
-        })
-
-    if not Receipt.objects.filter(expense_id=expense.id).exists():
-        score += 20
-        reasons.append({
-            'code': 'MISSING_RECEIPT',
-            'message': 'No receipt is attached to this expense.',
-        })
-
-    if len(str(expense.description or '').strip()) < 15:
-        score += 10
-        reasons.append({
-            'code': 'WEAK_DESCRIPTION',
-            'message': 'The business-purpose description is missing or too short.',
-        })
-
-    budget_percentage = expense_budget_pressure(expense)
-    if budget_percentage >= 100:
-        score += 25
-        reasons.append({
-            'code': 'BUDGET_EXCEEDED',
-            'message': 'This expense would take the applicable budget over its limit.',
-            'percentage': budget_percentage,
-        })
-    elif budget_percentage >= 80:
-        score += 15
-        reasons.append({
-            'code': 'BUDGET_PRESSURE',
-            'message': 'This expense would use at least 80% of the applicable budget.',
-            'percentage': budget_percentage,
-        })
-
-    pending_days = max(0, (timezone.localdate() - expense.date).days)
-    if pending_days > 7:
-        score += 10
-        reasons.append({
-            'code': 'OLD_PENDING_EXPENSE',
-            'message': f'Expense has been waiting for review for {pending_days} days.',
-            'pending_days': pending_days,
-        })
-
-    score = min(score, 100)
-    risk_level = severity_from_score(score)
-    reason_codes = [reason['code'] for reason in reasons]
+    risk_level = result['risk_level']
     return {
         **build_expense_snapshot(expense),
-        'score': score,
-        'risk_score': score,
-        'severity': risk_level,
+        'score': result['risk_score'],
+        'risk_score': result['risk_score'],
+        'severity': risk_level.upper(),
         'risk_level': risk_level.title(),
         'reasons': reasons,
-        'review_reasons': [reason['message'] for reason in reasons],
-        'review_suggestion': review_suggestion(reason_codes),
+        'triggered_rules': result['triggered_rules'],
+        'review_reasons': [r['message'] for r in reasons],
+        'review_suggestion': result['review_suggestion'],
+        'recommendations': result['recommendations'],
+        'rule_count': result['rule_count'],
         'source': 'rules',
     }
 
@@ -1185,13 +1020,39 @@ def anomalies(request):
         'lookback_days': lookback_days,
         'start_date': start_date,
         'end_date': end_date,
-        'rules': [
-            'HIGH_CATEGORY_AMOUNT',
-            'HIGH_VENDOR_AMOUNT',
-            'DUPLICATE_CANDIDATE',
-            'NEW_VENDOR',
-            'WEEKEND_EXPENSE',
-        ],
+        'rules': [code for code, r in EXPENSE_REVIEW_RULES.items() if r.get('enabled')],
         'total_flagged': len(flagged),
         'anomalies': flagged[:limit],
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def rules(request):
+    category_filter = request.query_params.get('category')
+    severity_filter = request.query_params.get('severity')
+
+    rule_list = []
+    for code, rule in EXPENSE_REVIEW_RULES.items():
+        if category_filter and rule['category'] != category_filter.upper():
+            continue
+        if severity_filter and rule['severity'] != severity_filter.upper():
+            continue
+        rule_list.append({
+            'code': code,
+            'name': rule['name'],
+            'category': rule['category'],
+            'category_label': RULE_CATEGORIES.get(rule['category'], rule['category']),
+            'description': rule['description'],
+            'score': rule['score'],
+            'severity': rule['severity'],
+            'recommendation': rule['recommendation'],
+            'enabled': rule.get('enabled', True),
+            'version': rule.get('version', '1.0'),
+        })
+
+    return Response({
+        'total': len(rule_list),
+        'categories': RULE_CATEGORIES,
+        'rules': rule_list,
     })

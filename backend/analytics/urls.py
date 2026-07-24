@@ -14,4 +14,5 @@ urlpatterns = [
     path('ai-insights/', views.ai_insights, name='analytics-ai-insights'),
     path('rule-based-advice/', views.rule_based_advice, name='analytics-rule-based-advice'),
     path('anomalies/', views.anomalies, name='analytics-anomalies'),
+    path('rules/', views.rules, name='analytics-rules'),
 ]

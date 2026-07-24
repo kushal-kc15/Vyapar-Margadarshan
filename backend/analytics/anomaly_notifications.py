@@ -30,9 +30,6 @@ def notify_owners_if_expense_is_unusual(expense):
         if not is_staff_submission:
             return None
 
-        # Import at call time so the existing endpoint and notification path
-        # share the exact same scoring implementation without a dependency
-        # cycle during Django app loading.
         from analytics.views import detect_expense_anomalies
 
         today = timezone.localdate()

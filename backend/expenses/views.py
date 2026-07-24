@@ -17,6 +17,42 @@ from organizations.context import get_active_membership
 from organizations.models import OrganizationMember
 from analytics.anomaly_notifications import notify_owners_if_expense_is_unusual
 
+import logging
+
+_logger = logging.getLogger(__name__)
+
+
+def _build_rule_snapshot(expense, organization):
+    """Capture the rule engine evaluation at approval/rejection time.
+
+    Stored in the activity log metadata so the decision can be explained
+    historically even if rule definitions change later.
+    """
+    try:
+        from analytics.rule_context import build_context
+        from analytics.rule_engine import evaluate_expense
+
+        base_queryset = Expense.objects.filter(
+            organization=organization,
+            status__in={'APPROVED', 'PENDING'},
+            date__gte=expense.date - timedelta(days=180),
+            date__lte=expense.date,
+        ).select_related('user', 'organization')
+        context = build_context(expense, base_queryset)
+        result = evaluate_expense(expense, context)
+        return {
+            'risk_score': result['risk_score'],
+            'risk_level': result['risk_level'],
+            'rule_count': result['rule_count'],
+            'triggered_rules': [
+                {'code': r['code'], 'score': r['score'], 'severity': r['severity']}
+                for r in result['triggered_rules']
+            ],
+        }
+    except Exception:
+        _logger.exception('Rule snapshot failed for expense %s', expense.id)
+        return None
+
 
 class ExpenseViewSet(viewsets.ModelViewSet):
     serializer_class = ExpenseSerializer
@@ -452,6 +488,8 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                     'reason': expense.rejection_reason,
                 }
                 action_type = 'EXPENSE_REJECTED'
+
+            metadata['rule_snapshot'] = _build_rule_snapshot(expense, member.organization)
 
             log_activity(
                 organization=member.organization,

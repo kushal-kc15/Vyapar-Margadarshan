@@ -6,6 +6,7 @@ import {
   Wallet,
   BarChart3,
   BrainCircuit,
+  BookOpen,
   Store,
   Users,
   Bell,
@@ -24,6 +25,7 @@ const PRIMARY = [
   { key: 'budgets', to: '/budgets', label: 'Budgets', icon: Wallet, ownerOnly: true },
   { key: 'reports', to: '/reports', label: 'Reports', icon: BarChart3, ownerOnly: true },
   { key: 'insights', to: '/insights', label: 'Insights', icon: BrainCircuit, ownerOnly: true },
+  { key: 'rules', to: '/rules', label: 'Rules', icon: BookOpen, ownerOnly: true },
   { key: 'vendors', to: '/vendors', label: 'Vendors', icon: Store, ownerOnly: true },
 ];
 
