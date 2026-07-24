@@ -27,6 +27,9 @@ Pillow==10.4.0
 reportlab==4.5.1
 requests==2.31.0
 google-genai
+# Machine learning (anomaly detection)
+scikit-learn>=1.4
+
 # Background processing
 celery==5.3.6
 redis==5.0.1

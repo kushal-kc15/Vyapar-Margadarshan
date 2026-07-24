@@ -11,7 +11,6 @@ import {
   X,
 } from "lucide-react";
 
-import api from "../lib/api.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { PageHeader } from "../components/PageHeader.jsx";
 import { Panel, PanelTitle } from "../components/Panel.jsx";
@@ -20,6 +19,9 @@ import { Money } from "../components/Money.jsx";
 import { Spinner } from "../components/Feedback.jsx";
 import Button from "../components/Button.jsx";
 import { AnomalyCard } from "../components/insights/index.js";
+import { useRuleAdvice } from "../hooks/useRuleAdvice.js";
+import { useAnomalies } from "../hooks/useAnomalies.js";
+import { useAiInsights } from "../hooks/useAiInsights.js";
 
 const DATE_PRESETS = [
   { value: "this_month", label: "This month" },
@@ -97,21 +99,31 @@ export default function Insights() {
   const [from, setFrom] = useState(initialRange.from);
   const [to, setTo] = useState(initialRange.to);
 
-  const [ruleAdvice, setRuleAdvice] = useState(null);
-  const [ruleLoading, setRuleLoading] = useState(true);
-  const [ruleError, setRuleError] = useState("");
   const [dismissedAdviceKeys, setDismissedAdviceKeys] = useState([]);
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
-
-  const [anomalyData, setAnomalyData] = useState(null);
-  const [anomalyLoading, setAnomalyLoading] = useState(true);
-  const [anomalyError, setAnomalyError] = useState("");
-
   const [insightPeriod, setInsightPeriod] = useState("this_month");
-  const [aiInsights, setAiInsights] = useState(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState("");
   const [aiExpanded, setAiExpanded] = useState(false);
+
+  const {
+    data: ruleAdvice,
+    isLoading: ruleLoading,
+    error: ruleQueryError,
+  } = useRuleAdvice({ organizationId, startDate: from, endDate: to });
+  const ruleError = ruleQueryError ? "Rule-based advice could not be loaded." : "";
+
+  const {
+    data: anomalyData,
+    isLoading: anomalyLoading,
+    error: anomalyQueryError,
+  } = useAnomalies({ organizationId, startDate: from, endDate: to });
+  const anomalyError = anomalyQueryError ? "Unusual expense checks could not be loaded." : "";
+
+  const aiMutation = useAiInsights();
+  const aiInsights = aiMutation.data ?? null;
+  const aiLoading = aiMutation.isPending;
+  const aiError = aiMutation.error
+    ? "No spending summary is available at the moment. Summary will appear after approved expense data is available."
+    : "";
 
   useEffect(() => {
     const range = presetBounds(preset);
@@ -124,69 +136,14 @@ export default function Insights() {
   }, [organizationId]);
 
   useEffect(() => {
-    if (!organizationId || !from || !to) return undefined;
-    let cancelled = false;
-    setRuleLoading(true);
-    setRuleError("");
-    setRuleModalOpen(false);
-    api.get("/analytics/rule-based-advice/", { params: { start_date: from, end_date: to } })
-      .then((response) => {
-        if (!cancelled) setRuleAdvice(response.data ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRuleAdvice(null);
-          setRuleError("Rule-based advice could not be loaded.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setRuleLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [organizationId, from, to]);
-
-  useEffect(() => {
-    if (!organizationId || !from || !to) return undefined;
-    let cancelled = false;
-    setAnomalyLoading(true);
-    setAnomalyError("");
-    api.get("/analytics/anomalies/", { params: { start_date: from, end_date: to, limit: 20 } })
-      .then((response) => {
-        if (!cancelled) setAnomalyData(response.data ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAnomalyData(null);
-          setAnomalyError("Unusual expense checks could not be loaded.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setAnomalyLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [organizationId, from, to]);
-
-  useEffect(() => {
-    setAiInsights(null);
-    setAiError("");
+    aiMutation.reset();
     setAiExpanded(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organizationId]);
 
-  const generateInsights = async () => {
+  const generateInsights = () => {
     if (aiLoading || !organizationId) return;
-    setAiLoading(true);
-    setAiError("");
-    try {
-      const response = await api.get("/analytics/ai-insights/", { params: { period: insightPeriod } });
-      setAiInsights(response.data ?? null);
-      setAiExpanded(true);
-    } catch {
-      setAiInsights(null);
-      setAiExpanded(true);
-      setAiError("No spending summary is available at the moment. Summary will appear after approved expense data is available.");
-    } finally {
-      setAiLoading(false);
-    }
+    aiMutation.mutate(insightPeriod, { onSuccess: () => setAiExpanded(true), onError: () => setAiExpanded(true) });
   };
 
   const activeAdvisories = (ruleAdvice?.advisories ?? []).filter(
@@ -356,9 +313,11 @@ function RuleAdviceModal({ open, onClose, advisories, currency, onClear }) {
 }
 
 
+const REVIEWABLE_STATUSES = new Set(["SUBMITTED", "PENDING", "IN_REVIEW"]);
+
 function UnusualExpenseCard({ data, loading, error, currency }) {
   const anomalies = (data?.anomalies ?? []).filter(
-    (expense) => String(expense?.status ?? "").toUpperCase() === "PENDING",
+    (expense) => REVIEWABLE_STATUSES.has(String(expense?.status ?? "").toUpperCase()),
   );
   const visible = anomalies.slice(0, 5);
   const hiddenCount = Math.max(0, anomalies.length - visible.length);

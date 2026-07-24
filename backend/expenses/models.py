@@ -60,7 +60,7 @@ class Expense(models.Model):
     status = models.CharField(
         max_length=10,
         choices=STATUS_CHOICES,
-        default='PENDING'
+        default='APPROVED'
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -77,3 +77,40 @@ class Expense(models.Model):
     
     def __str__(self):
         return f"{self.title} - रू {self.amount}"
+
+
+class ApprovalAuditLog(models.Model):
+    """Records every status transition in the expense approval workflow."""
+    TRANSITION_CHOICES = [
+        ('SUBMITTED', 'Submitted for Review'),
+        ('REVIEW_STARTED', 'Review Started'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+        ('RETURNED', 'Returned for Changes'),
+        ('RESUBMITTED', 'Resubmitted'),
+        ('AUTO_APPROVED', 'Auto-Approved by Rule Engine'),
+    ]
+
+    expense = models.ForeignKey(
+        Expense, on_delete=models.CASCADE, related_name='approval_audit_logs'
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, related_name='approval_actions'
+    )
+    transition = models.CharField(max_length=15, choices=TRANSITION_CHOICES)
+    from_status = models.CharField(max_length=10, blank=True)
+    to_status = models.CharField(max_length=10)
+    reason = models.TextField(blank=True)
+    rule_snapshot = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'approval_audit_log'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['expense', '-created_at'], name='aal_expense_ts_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.expense_id} | {self.transition} by {self.actor_id} at {self.created_at}"

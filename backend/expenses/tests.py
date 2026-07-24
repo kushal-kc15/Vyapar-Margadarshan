@@ -448,7 +448,7 @@ class ExpenseStatusPermissionTestCase(TestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertEqual(response.data['error'], 'Only pending or rejected expenses can be edited.')
+        self.assertEqual(response.data['error'], 'Only draft, submitted, pending, rejected, or returned expenses can be edited.')
         expense.refresh_from_db()
         self.assertEqual(expense.title, 'Submitted receipt')
 
@@ -470,11 +470,11 @@ class ExpenseStatusPermissionTestCase(TestCase):
         expense.refresh_from_db()
         self.assertEqual(expense.title, 'Corrected rejected expense')
         self.assertEqual(expense.vendor, 'Corrected vendor')
-        self.assertEqual(expense.status, 'PENDING')
+        self.assertEqual(expense.status, 'SUBMITTED')
         self.assertIsNone(expense.reviewed_by)
         self.assertIsNone(expense.reviewed_at)
         self.assertEqual(expense.rejection_reason, '')
-        self.assertEqual(response.data['status'], 'PENDING')
+        self.assertEqual(response.data['status'], 'SUBMITTED')
         notify_pending.assert_called_once()
 
     def test_owner_cannot_patch_another_users_expense_in_any_status(self):
@@ -821,7 +821,7 @@ class ExpenseApprovalDecisionTestCase(TestCase):
 
         self.assertEqual(resubmit_response.status_code, status.HTTP_200_OK)
         expense.refresh_from_db()
-        self.assertEqual(expense.status, 'PENDING')
+        self.assertEqual(expense.status, 'SUBMITTED')
         self.assertEqual(expense.amount, Decimal('55.00'))
         self.assertEqual(expense.rejection_reason, '')
         notify_pending.assert_called_once()

@@ -103,7 +103,7 @@ class UnusualExpenseNotificationTests(TestCase):
         response = self.submit_staff_expense()
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(Expense.objects.get(id=response.data['id']).status, 'PENDING')
+        self.assertEqual(Expense.objects.get(id=response.data['id']).status, 'SUBMITTED')
         self.assertFalse(self.unusual_notifications().exists())
 
     def test_cross_workspace_history_is_not_used_for_scoring(self):

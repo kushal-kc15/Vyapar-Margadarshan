@@ -1149,3 +1149,96 @@ def routing_preview(request, expense_id):
             for r in routing['triggered_rules']
         ],
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def rule_metrics(request):
+    """Rule performance metrics: trigger frequency, outcome rates, accuracy."""
+    from collections import defaultdict
+    from expenses.models import ApprovalAuditLog
+
+    member = get_member_or_error(request)
+    if member.role != 'OWNER':
+        return Response({'error': 'Only owners can view rule metrics.'}, status=403)
+
+    logs = ApprovalAuditLog.objects.filter(
+        expense__organization=member.organization,
+        transition__in=['APPROVED', 'REJECTED', 'AUTO_APPROVED'],
+    ).exclude(rule_snapshot={})
+
+    rule_stats = defaultdict(lambda: {'triggers': 0, 'approved': 0, 'rejected': 0, 'auto_approved': 0})
+    total_decisions = 0
+
+    for log in logs:
+        snapshot = log.rule_snapshot or {}
+        triggered = snapshot.get('triggered_rules', [])
+        transition = log.transition
+        total_decisions += 1
+
+        for rule in triggered:
+            code = rule.get('code', '')
+            if not code:
+                continue
+            rule_stats[code]['triggers'] += 1
+            if transition == 'APPROVED':
+                rule_stats[code]['approved'] += 1
+            elif transition == 'REJECTED':
+                rule_stats[code]['rejected'] += 1
+            elif transition == 'AUTO_APPROVED':
+                rule_stats[code]['auto_approved'] += 1
+
+    metrics = []
+    for code, stats in sorted(rule_stats.items(), key=lambda x: x[1]['triggers'], reverse=True):
+        total = stats['triggers']
+        rejection_rate = round(stats['rejected'] / total * 100, 1) if total > 0 else 0
+        metrics.append({
+            'code': code,
+            'trigger_count': total,
+            'approved_count': stats['approved'],
+            'rejected_count': stats['rejected'],
+            'auto_approved_count': stats['auto_approved'],
+            'rejection_rate': rejection_rate,
+        })
+
+    auto_approved_count = logs.filter(transition='AUTO_APPROVED').count()
+
+    return Response({
+        'total_decisions': total_decisions,
+        'auto_approved_count': auto_approved_count,
+        'auto_approval_rate': round(auto_approved_count / total_decisions * 100, 1) if total_decisions > 0 else 0,
+        'rule_metrics': metrics,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def ml_anomalies(request):
+    """Detect anomalies using Isolation Forest ML model."""
+    from .ml_anomaly import detect_ml_anomalies
+
+    member = get_member_or_error(request)
+    if member.role != 'OWNER':
+        return Response({'error': 'Only owners can view ML anomalies.'}, status=403)
+
+    lookback = int(request.query_params.get('lookback_days', 180))
+    top_n = int(request.query_params.get('limit', 10))
+
+    results = detect_ml_anomalies(
+        member.organization,
+        lookback_days=min(lookback, 365),
+        top_n=min(top_n, 50),
+    )
+
+    if results is None:
+        return Response({
+            'anomalies': [],
+            'model_trained': False,
+            'message': 'Insufficient data for ML analysis (minimum 30 approved expenses required).',
+        })
+
+    return Response({
+        'anomalies': results,
+        'model_trained': True,
+        'count': len(results),
+    })

@@ -17,6 +17,7 @@ from organizations.context import get_active_membership
 from organizations.models import OrganizationMember
 from analytics.anomaly_notifications import notify_owners_if_expense_is_unusual
 from analytics.approval_routing import apply_routing
+from .audit import record_transition
 
 import logging
 
@@ -128,6 +129,11 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                     'updated_at',
                 ])
 
+                record_transition(
+                    expense, actor=request.user, transition='RESUBMITTED',
+                    from_status=original_status, to_status='SUBMITTED',
+                )
+
                 member = get_active_membership(request.user, request)
                 if member:
                     log_activity(
@@ -171,9 +177,18 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                 metadata={'expense_id': expense.id, 'status': initial_status}
             )
             if not is_draft:
+                record_transition(
+                    expense, actor=user, transition='SUBMITTED',
+                    from_status='', to_status='SUBMITTED',
+                )
                 try:
                     routing = apply_routing(expense, member.organization)
                     if routing['applied']:
+                        record_transition(
+                            expense, actor=None, transition='AUTO_APPROVED',
+                            from_status='SUBMITTED', to_status='APPROVED',
+                            rule_snapshot=routing,
+                        )
                         self.check_budgets_for_expense(expense)
                         return
                 except Exception:
@@ -458,6 +473,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            previous_status = expense.status
             expense.status = decision
 
             now = timezone.now()
@@ -497,7 +513,16 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                 }
                 action_type = 'EXPENSE_REJECTED'
 
-            metadata['rule_snapshot'] = _build_rule_snapshot(expense, member.organization)
+            rule_snapshot = _build_rule_snapshot(expense, member.organization)
+            metadata['rule_snapshot'] = rule_snapshot
+
+            record_transition(
+                expense, actor=user,
+                transition='APPROVED' if approving else 'REJECTED',
+                from_status=previous_status, to_status=decision,
+                reason='' if approving else expense.rejection_reason,
+                rule_snapshot=rule_snapshot or {},
+            )
 
             log_activity(
                 organization=member.organization,
@@ -551,6 +576,11 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             expense.status = 'SUBMITTED'
             expense.save(update_fields=['status', 'updated_at'])
 
+            record_transition(
+                expense, actor=user, transition='SUBMITTED',
+                from_status='DRAFT', to_status='SUBMITTED',
+            )
+
             if member:
                 log_activity(
                     organization=member.organization,
@@ -595,9 +625,15 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            previous_status = expense.status
             expense.status = 'IN_REVIEW'
             expense.reviewed_by = user
             expense.save(update_fields=['status', 'reviewed_by', 'updated_at'])
+
+            record_transition(
+                expense, actor=user, transition='REVIEW_STARTED',
+                from_status=previous_status, to_status='IN_REVIEW',
+            )
 
             log_activity(
                 organization=member.organization,
@@ -638,6 +674,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                 )
 
             reason = (request.data.get('reason', '') or '').strip()
+            previous_status = expense.status
             expense.status = 'RETURNED'
             expense.reviewed_by = user
             expense.reviewed_at = timezone.now()
@@ -645,6 +682,12 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             expense.save(update_fields=[
                 'status', 'reviewed_by', 'reviewed_at', 'rejection_reason', 'updated_at'
             ])
+
+            record_transition(
+                expense, actor=user, transition='RETURNED',
+                from_status=previous_status, to_status='RETURNED',
+                reason=reason,
+            )
 
             log_activity(
                 organization=member.organization,
@@ -664,11 +707,47 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(expense)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['get'], url_path='audit-trail')
+    def audit_trail(self, request, pk=None):
+        """Get the approval audit trail for a specific expense."""
+        from .models import ApprovalAuditLog
+
+        try:
+            expense = self.get_queryset().get(pk=pk)
+        except Expense.DoesNotExist:
+            return Response({'error': 'Expense not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        logs = ApprovalAuditLog.objects.filter(expense=expense).select_related('actor')
+        trail = [
+            {
+                'id': log.id,
+                'transition': log.transition,
+                'transition_label': log.get_transition_display(),
+                'from_status': log.from_status,
+                'to_status': log.to_status,
+                'actor': {
+                    'id': log.actor.id,
+                    'username': log.actor.username,
+                    'name': log.actor.get_full_name(),
+                } if log.actor else None,
+                'reason': log.reason,
+                'rule_snapshot': log.rule_snapshot or None,
+                'created_at': log.created_at,
+            }
+            for log in logs
+        ]
+
+        return Response({
+            'expense_id': expense.id,
+            'current_status': expense.status,
+            'trail': trail,
+        })
+
     @action(detail=False, methods=['get'])
     def vendor_analytics(self, request):
         """Get vendor spending analytics"""
         user = request.user
-        
+
         member = get_active_membership(user, request)
 
         if member and member.role == 'OWNER':

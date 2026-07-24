@@ -17,4 +17,6 @@ urlpatterns = [
     path('rules/', views.rules, name='analytics-rules'),
     path('rules/<str:code>/', views.rule_update, name='analytics-rule-update'),
     path('routing/<int:expense_id>/', views.routing_preview, name='analytics-routing-preview'),
+    path('rule-metrics/', views.rule_metrics, name='analytics-rule-metrics'),
+    path('ml-anomalies/', views.ml_anomalies, name='analytics-ml-anomalies'),
 ]

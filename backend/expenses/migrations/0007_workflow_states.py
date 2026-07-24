@@ -13,6 +13,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='expense',
             name='status',
-            field=models.CharField(choices=[('DRAFT', 'Draft'), ('SUBMITTED', 'Submitted'), ('PENDING', 'Pending Review'), ('IN_REVIEW', 'In Review'), ('APPROVED', 'Approved'), ('REJECTED', 'Rejected'), ('RETURNED', 'Returned')], default='PENDING', max_length=10),
+            field=models.CharField(choices=[('DRAFT', 'Draft'), ('SUBMITTED', 'Submitted'), ('PENDING', 'Pending Review'), ('IN_REVIEW', 'In Review'), ('APPROVED', 'Approved'), ('REJECTED', 'Rejected'), ('RETURNED', 'Returned')], default='APPROVED', max_length=10),
         ),
     ]

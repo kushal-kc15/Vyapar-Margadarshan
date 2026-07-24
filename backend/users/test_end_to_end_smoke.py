@@ -94,7 +94,7 @@ class EndToEndSmokeTestCase(TestCase):
             format='json',
         )
         self.assertEqual(staff_expense_response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(staff_expense_response.data['status'], 'PENDING')
+        self.assertEqual(staff_expense_response.data['status'], 'SUBMITTED')
 
         self.authenticate_owner()
         pending_response = self.client.get('/api/expenses/pending_approvals/')
