@@ -1,5 +1,7 @@
 # Features
 
+**Live:** [https://vyaparmd.tech](https://vyaparmd.tech)
+
 ## Multi-Workspace Support
 
 Users can belong to multiple organizations. The active workspace is sent through the `X-Organization-ID` request header so backend data stays scoped to the selected organization.
@@ -17,43 +19,101 @@ Users can record expenses with:
 - Category
 - Vendor
 - Receipt attachment
-- Submission status
+
+Staff can save as **Draft** before submitting, or submit directly. Submitted expenses go through the approval workflow.
+
+## Multi-Stage Approval Workflow
+
+Expenses move through a structured workflow:
+
+```
+DRAFT → SUBMITTED → IN_REVIEW → APPROVED
+                              ↘ REJECTED
+                              ↘ RETURNED → (edit) → SUBMITTED
+```
+
+- **Draft**: saved but not yet submitted
+- **Submitted**: sent for review; rule engine evaluates it immediately
+- **In Review**: owner is actively reviewing
+- **Approved / Rejected**: final decisions
+- **Returned**: sent back for corrections without full rejection
+
+## Rule-Based Expert System
+
+Every submitted expense is evaluated by a configurable knowledge base of 15 business rules across 7 categories:
+
+| Category | Rules |
+|----------|-------|
+| Spending Pattern | High Category Amount, High Vendor Amount, Monthly Spike, Statistical Outlier |
+| Financial Risk | High Amount (Critical / Elevated / Routine) |
+| Duplicate Detection | Duplicate Candidate |
+| Compliance | Missing Receipt, Weak Description, Missing Vendor |
+| Vendor Risk | New Vendor |
+| Budget | Budget Exceeded, Budget Pressure |
+| Approval | Old Pending Expense |
+
+Each rule contributes a risk score. The total score determines LOW / MEDIUM / HIGH risk level. Owners can enable/disable rules and adjust scores from the Rules page or Django Admin.
+
+## Rule-Driven Approval Routing
+
+When an expense is submitted, the routing engine automatically:
+
+- **Auto-approves** low-risk expenses (score ≤ 10, no significant flags)
+- Sends medium-risk expenses for **standard review**
+- Flags high-risk expenses (score ≥ 50) for **priority review**
+
+## Approval Audit Trail
+
+Every status transition is recorded in an `ApprovalAuditLog` with:
+
+- Who made the transition and when
+- Previous and new status
+- Reason (for rejections and returns)
+- Rule engine snapshot at the time of decision
+
+Available at `GET /api/expenses/{id}/audit-trail/`.
+
+## ML Anomaly Detection
+
+Isolation Forest model trained on historical approved expenses detects statistical outliers that rule-based checks might miss. Available at `GET /api/analytics/ml-anomalies/` (requires ≥ 30 approved expenses for training).
 
 ## Receipt Upload and AI Scanning
 
 Receipt files can be uploaded and scanned with Gemini Vision through the Django backend. API keys stay server-side, and extracted fields are shown to the user for review before an expense is created.
 
-## Approval and Rejection Workflow
-
-Owners can review pending expenses and either approve them or reject them with a reason. Approved expenses become part of reports, budgets, dashboard metrics, and CSV exports.
-
-## Correction and Resubmission
-
-Rejected expenses can be corrected by the submitter and sent back into the approval queue.
-
 ## Budgets and Alerts
 
-Owners can create category or all-category budgets by period. Budget thresholds help highlight spending that is near or over the configured limit.
+Owners can create category or all-category budgets by period. Budget thresholds highlight spending that is near or over the configured limit.
 
-## Reports and CSV Export
+## Analytics
 
-Reports use approved expenses only. Reports support date filtering, category/vendor filtering when available, spend-over-time charts, category breakdowns, vendor breakdowns, approved expense tables, and CSV export.
+- Spending trends (daily / weekly / monthly)
+- Category breakdowns and vendor summaries
+- Period comparisons
+- Budget burn rate
+- Unusual expense signals (rule-based anomaly cards)
+- Rule performance metrics (trigger frequency, approval/rejection rates, auto-approval rate)
+- AI-generated spending summaries via Gemini
+
+## Reports and Exports
+
+Reports use approved expenses only. Support date filtering, category/vendor filtering, approved expense tables, CSV export, and PDF report generation.
 
 ## Team Invitations
 
-Owners can invite users to a workspace by email. Invitations support new-user and existing-user acceptance flows.
+Owners can invite users to a workspace by email. Invitations support new-user and existing-user acceptance flows, and can be cancelled before acceptance.
 
-## Invitation Cancellation
+## Transactional Email
 
-Pending invitations can be cancelled by owners so unused invite links no longer remain active.
+Email notifications for approvals, rejections, and invitations are sent via Brevo (Sendinblue) using django-anymail.
 
-## Staff Read-Only Team View
+## Staff Navigation
 
-Staff users can view workspace members but cannot manage invitations, roles, or memberships.
+Staff users see: Overview, Expenses, Reports, Insights, Vendors, Team, Activity, Settings. Owner-only sections (Approvals, Budgets, Rules) are hidden.
 
 ## Admin Dashboard
 
-Django Admin is styled with Jazzmin and configured as a website manager console for platform-level management.
+Django Admin is styled with Jazzmin and configured as a website manager console for platform-level management, including business rule editing.
 
 ## Theme Switching
 
@@ -61,4 +121,4 @@ The frontend supports light, dark, and system theme preferences.
 
 ## Notifications and Activity Logs
 
-The backend includes notifications and activity logs for important system events such as expense changes, approvals, invitations, and budget-related activity.
+Notifications and activity logs for expense changes, approvals, rejections, returns, budget alerts, and team events.
