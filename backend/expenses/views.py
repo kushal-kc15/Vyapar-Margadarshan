@@ -16,6 +16,7 @@ from notifications.utils import notify_expense_approved, notify_expense_rejected
 from organizations.context import get_active_membership
 from organizations.models import OrganizationMember
 from analytics.anomaly_notifications import notify_owners_if_expense_is_unusual
+from analytics.approval_routing import apply_routing
 
 import logging
 
@@ -34,7 +35,7 @@ def _build_rule_snapshot(expense, organization):
 
         base_queryset = Expense.objects.filter(
             organization=organization,
-            status__in={'APPROVED', 'PENDING'},
+            status__in={'APPROVED', 'SUBMITTED', 'PENDING', 'IN_REVIEW'},
             date__gte=expense.date - timedelta(days=180),
             date__lte=expense.date,
         ).select_related('user', 'organization')
@@ -99,9 +100,9 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                 )
 
             original_status = expense.status
-            if original_status not in {'PENDING', 'REJECTED'}:
+            if original_status not in {'DRAFT', 'SUBMITTED', 'PENDING', 'REJECTED', 'RETURNED'}:
                 return Response(
-                    {'error': 'Only pending or rejected expenses can be edited.'},
+                    {'error': 'Only draft, submitted, pending, rejected, or returned expenses can be edited.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -114,8 +115,8 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             self.perform_update(serializer)
             expense = serializer.instance
 
-            if original_status == 'REJECTED':
-                expense.status = 'PENDING'
+            if original_status in {'REJECTED', 'RETURNED'}:
+                expense.status = 'SUBMITTED'
                 expense.reviewed_by = None
                 expense.reviewed_at = None
                 expense.rejection_reason = ''
@@ -132,12 +133,12 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                     log_activity(
                         organization=member.organization,
                         user=request.user,
-                        action_type='EXPENSE_UPDATED',
+                        action_type='EXPENSE_SUBMITTED',
                         description=(
                             f"{request.user.get_full_name()} resubmitted expense: "
                             f"{expense.title} (रू {expense.amount})"
                         ),
-                        metadata={'expense_id': expense.id, 'status': 'PENDING'}
+                        metadata={'expense_id': expense.id, 'status': 'SUBMITTED'}
                     )
                     owners = OrganizationMember.objects.filter(
                         organization=member.organization,
@@ -153,41 +154,45 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user
         member = get_active_membership(user, self.request)
-        
-        # Set status based on role
+        is_draft = self.request.data.get('is_draft', False)
+
         if member and member.role == 'STAFF':
-            # Staff expenses need approval
+            initial_status = 'DRAFT' if is_draft else 'SUBMITTED'
             expense = serializer.save(
                 user=user,
                 organization=member.organization,
-                status='PENDING'
+                status=initial_status
             )
-            # Log activity
             log_activity(
                 organization=member.organization,
                 user=user,
                 action_type='EXPENSE_CREATED',
                 description=f"{user.get_full_name()} created expense: {expense.title} (रू {expense.amount})",
-                metadata={'expense_id': expense.id, 'status': 'PENDING'}
+                metadata={'expense_id': expense.id, 'status': initial_status}
             )
-            # Notify owners about pending approval
-            owners = OrganizationMember.objects.filter(
-                organization=member.organization,
-                role='OWNER'
-            )
-            notify_pending_approval(owners, expense)
-            notify_owners_if_expense_is_unusual(expense)
+            if not is_draft:
+                try:
+                    routing = apply_routing(expense, member.organization)
+                    if routing['applied']:
+                        self.check_budgets_for_expense(expense)
+                        return
+                except Exception:
+                    _logger.debug('Approval routing skipped for expense %s', expense.id)
+
+                owners = OrganizationMember.objects.filter(
+                    organization=member.organization,
+                    role='OWNER'
+                )
+                notify_pending_approval(owners, expense)
+                notify_owners_if_expense_is_unusual(expense)
         else:
-            # Owner expenses are auto-approved
             if member:
                 expense = serializer.save(
                     user=user,
                     organization=member.organization,
                     status='APPROVED'
                 )
-                # Check budgets for auto-approved expenses
                 self.check_budgets_for_expense(expense)
-                # Log activity
                 log_activity(
                     organization=member.organization,
                     user=user,
@@ -196,7 +201,6 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                     metadata={'expense_id': expense.id, 'status': 'APPROVED'}
                 )
             else:
-                # User without organization (shouldn't happen, but handle it)
                 serializer.save(user=user, status='APPROVED')
     
     def check_budgets_for_expense(self, expense):
@@ -362,28 +366,30 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def my_expenses(self, request):
         """Get current user's expenses with status breakdown"""
         user = request.user
-        
-        # Get all user's expenses
+
         expenses = self.get_queryset()
-        
-        # Count by status
-        pending_count = expenses.filter(status='PENDING').count()
+
+        draft_count = expenses.filter(status='DRAFT').count()
+        submitted_count = expenses.filter(status__in=['SUBMITTED', 'PENDING', 'IN_REVIEW']).count()
         approved_count = expenses.filter(status='APPROVED').count()
         rejected_count = expenses.filter(status='REJECTED').count()
-        
-        # Calculate totals
-        pending_total = expenses.filter(status='PENDING').aggregate(
-            total=Sum('amount')
-        )['total'] or 0
-        
+        returned_count = expenses.filter(status='RETURNED').count()
+
+        submitted_total = expenses.filter(
+            status__in=['SUBMITTED', 'PENDING', 'IN_REVIEW']
+        ).aggregate(total=Sum('amount'))['total'] or 0
+
         approved_total = expenses.filter(status='APPROVED').aggregate(
             total=Sum('amount')
         )['total'] or 0
-        
+
         return Response({
+            'draft': {
+                'count': draft_count,
+            },
             'pending': {
-                'count': pending_count,
-                'total': float(pending_total)
+                'count': submitted_count,
+                'total': float(submitted_total)
             },
             'approved': {
                 'count': approved_count,
@@ -391,6 +397,9 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             },
             'rejected': {
                 'count': rejected_count
+            },
+            'returned': {
+                'count': returned_count,
             },
             'total_count': expenses.count()
         })
@@ -408,10 +417,9 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # Get all pending expenses in the organization (excluding own expenses)
         pending_expenses = Expense.objects.filter(
             organization=member.organization,
-            status='PENDING'
+            status__in=['SUBMITTED', 'PENDING', 'IN_REVIEW']
         ).exclude(user=user).select_related('user', 'organization').order_by('-date', '-created_at')
         
         serializer = self.get_serializer(pending_expenses, many=True)
@@ -444,9 +452,9 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_403_FORBIDDEN
                 )
 
-            if expense.status != 'PENDING':
+            if expense.status not in {'SUBMITTED', 'PENDING', 'IN_REVIEW'}:
                 return Response(
-                    {'error': f'Only pending expenses can be {decision.lower()}'},
+                    {'error': f'Only submitted or in-review expenses can be {decision.lower()}'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -515,6 +523,146 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def reject(self, request, pk=None):
         """Reject a pending expense with reason (OWNER only)"""
         return self._decide_expense(request, pk, 'REJECTED')
+
+    @action(detail=True, methods=['post'])
+    def submit(self, request, pk=None):
+        """Submit a draft expense for review (submitter only)."""
+        user = request.user
+        member = get_active_membership(user, request)
+
+        with transaction.atomic():
+            try:
+                expense = self.get_queryset().select_for_update().get(pk=pk)
+            except Expense.DoesNotExist:
+                return Response({'error': 'Expense not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            if expense.user_id != user.id:
+                return Response(
+                    {'error': 'Only the submitter can submit this expense.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if expense.status != 'DRAFT':
+                return Response(
+                    {'error': 'Only draft expenses can be submitted.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            expense.status = 'SUBMITTED'
+            expense.save(update_fields=['status', 'updated_at'])
+
+            if member:
+                log_activity(
+                    organization=member.organization,
+                    user=user,
+                    action_type='EXPENSE_SUBMITTED',
+                    description=(
+                        f"{user.get_full_name()} submitted expense for review: "
+                        f"{expense.title} (रू {expense.amount})"
+                    ),
+                    metadata={'expense_id': expense.id, 'status': 'SUBMITTED'}
+                )
+                owners = OrganizationMember.objects.filter(
+                    organization=member.organization, role='OWNER'
+                )
+                notify_pending_approval(owners, expense)
+                notify_owners_if_expense_is_unusual(expense)
+
+        serializer = self.get_serializer(expense)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='start-review')
+    def start_review(self, request, pk=None):
+        """Mark an expense as actively being reviewed (OWNER only)."""
+        user = request.user
+
+        with transaction.atomic():
+            member = get_active_membership(user, request)
+            if not member or member.role != 'OWNER':
+                return Response(
+                    {'error': 'Only owners can start a review'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            try:
+                expense = self.get_queryset().select_for_update().get(pk=pk)
+            except Expense.DoesNotExist:
+                return Response({'error': 'Expense not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            if expense.status not in {'SUBMITTED', 'PENDING'}:
+                return Response(
+                    {'error': 'Only submitted expenses can be moved to review.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            expense.status = 'IN_REVIEW'
+            expense.reviewed_by = user
+            expense.save(update_fields=['status', 'reviewed_by', 'updated_at'])
+
+            log_activity(
+                organization=member.organization,
+                user=user,
+                action_type='EXPENSE_REVIEW_STARTED',
+                description=(
+                    f"{user.get_full_name()} started reviewing expense: "
+                    f"{expense.title} (रू {expense.amount}) by {expense.user.get_full_name()}"
+                ),
+                metadata={'expense_id': expense.id, 'reviewer_id': user.id}
+            )
+
+        serializer = self.get_serializer(expense)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='return')
+    def return_expense(self, request, pk=None):
+        """Return an expense to the submitter for changes (OWNER only)."""
+        user = request.user
+
+        with transaction.atomic():
+            member = get_active_membership(user, request)
+            if not member or member.role != 'OWNER':
+                return Response(
+                    {'error': 'Only owners can return expenses'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            try:
+                expense = self.get_queryset().select_for_update().get(pk=pk)
+            except Expense.DoesNotExist:
+                return Response({'error': 'Expense not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            if expense.status not in {'SUBMITTED', 'PENDING', 'IN_REVIEW'}:
+                return Response(
+                    {'error': 'Only submitted or in-review expenses can be returned.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            reason = (request.data.get('reason', '') or '').strip()
+            expense.status = 'RETURNED'
+            expense.reviewed_by = user
+            expense.reviewed_at = timezone.now()
+            expense.rejection_reason = reason
+            expense.save(update_fields=[
+                'status', 'reviewed_by', 'reviewed_at', 'rejection_reason', 'updated_at'
+            ])
+
+            log_activity(
+                organization=member.organization,
+                user=user,
+                action_type='EXPENSE_RETURNED',
+                description=(
+                    f"{user.get_full_name()} returned expense for changes: "
+                    f"{expense.title} (रू {expense.amount}) by {expense.user.get_full_name()}"
+                ),
+                metadata={
+                    'expense_id': expense.id,
+                    'returned_by': user.id,
+                    'reason': reason,
+                }
+            )
+
+        serializer = self.get_serializer(expense)
+        return Response(serializer.data)
 
     @action(detail=False, methods=['get'])
     def vendor_analytics(self, request):

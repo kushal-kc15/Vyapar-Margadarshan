@@ -63,6 +63,7 @@ def _base_context(**overrides):
         'category_stats': None,
         'vendor_stats': None,
         'statistical_baseline': None,
+        'monthly_spike': None,
         'duplicate_candidates': None,
         'is_new_vendor': False,
         'has_receipt': True,
@@ -275,6 +276,39 @@ class ReviewSuggestionTests(TestCase):
     def test_default_fallback(self):
         suggestion = review_suggestion(['OLD_PENDING_EXPENSE'])
         self.assertIn('review', suggestion.lower())
+
+
+class MonthlySpikeRuleTests(TestCase):
+    def test_triggers_when_spike_ratio_high(self):
+        expense = _make_expense()
+        context = _base_context(monthly_spike={
+            'current_month_total': 50000.0,
+            'monthly_average': 20000.0,
+            'spike_ratio': 2.5,
+            'months_compared': 3,
+        })
+        result = evaluate_expense(expense, context)
+        codes = [r['code'] for r in result['triggered_rules']]
+        self.assertIn('MONTHLY_SPIKE', codes)
+
+    def test_does_not_trigger_when_ratio_normal(self):
+        expense = _make_expense()
+        context = _base_context(monthly_spike={
+            'current_month_total': 25000.0,
+            'monthly_average': 20000.0,
+            'spike_ratio': 1.25,
+            'months_compared': 3,
+        })
+        result = evaluate_expense(expense, context)
+        codes = [r['code'] for r in result['triggered_rules']]
+        self.assertNotIn('MONTHLY_SPIKE', codes)
+
+    def test_does_not_trigger_when_no_data(self):
+        expense = _make_expense()
+        context = _base_context(monthly_spike=None)
+        result = evaluate_expense(expense, context)
+        codes = [r['code'] for r in result['triggered_rules']]
+        self.assertNotIn('MONTHLY_SPIKE', codes)
 
 
 class CategoryOutlierRuleTests(TestCase):

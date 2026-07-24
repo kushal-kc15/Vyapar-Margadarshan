@@ -93,6 +93,56 @@ def _budget_pressure(expense):
     return round(highest_percentage, 1)
 
 
+def _monthly_spending_spike(base_queryset, expense):
+    """Compare user's current-month spending to their 3-month moving average.
+
+    Returns None if fewer than 2 prior months of data exist.
+    """
+    current_month_start = expense.date.replace(day=1)
+    user_expenses = base_queryset.filter(user=expense.user)
+
+    current_month_total = (
+        user_expenses.filter(
+            date__gte=current_month_start,
+            date__lte=expense.date,
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    )
+
+    monthly_totals = []
+    for offset in range(1, 4):
+        month_start = (current_month_start - timedelta(days=offset * 28)).replace(day=1)
+        if offset < 3:
+            next_month_start = (month_start + timedelta(days=32)).replace(day=1)
+        else:
+            next_month_start = (month_start + timedelta(days=32)).replace(day=1)
+        month_end = next_month_start - timedelta(days=1)
+        total = (
+            user_expenses.filter(
+                date__gte=month_start,
+                date__lte=month_end,
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        )
+        if total > 0:
+            monthly_totals.append(float(total))
+
+    if len(monthly_totals) < 2:
+        return None
+
+    monthly_avg = sum(monthly_totals) / len(monthly_totals)
+    if monthly_avg <= 0:
+        return None
+
+    current_total_float = float(current_month_total)
+    spike_ratio = current_total_float / monthly_avg
+
+    return {
+        'current_month_total': round(current_total_float, 2),
+        'monthly_average': round(monthly_avg, 2),
+        'spike_ratio': round(spike_ratio, 2),
+        'months_compared': len(monthly_totals),
+    }
+
+
 def _category_statistical_baseline(base_queryset, expense):
     """Compute median, IQR, and z-score for the expense's category.
 
@@ -168,6 +218,7 @@ def build_context(expense, base_queryset, *, amount_multiplier=Decimal('2.5'),
         'category_stats': _category_baseline(base_queryset, expense, minimum_baseline_count),
         'vendor_stats': _vendor_baseline(base_queryset, expense, minimum_baseline_count),
         'statistical_baseline': _category_statistical_baseline(base_queryset, expense),
+        'monthly_spike': _monthly_spending_spike(base_queryset, expense),
         'duplicate_candidates': _duplicate_candidates(base_queryset, expense, duplicate_window_days),
         'is_new_vendor': _is_new_vendor(base_queryset, expense),
         'has_receipt': Receipt.objects.filter(expense_id=expense.id).exists(),

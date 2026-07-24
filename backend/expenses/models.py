@@ -11,9 +11,13 @@ class Expense(models.Model):
     Expense model for tracking business expenses.
     """
     STATUS_CHOICES = [
-        ('PENDING', 'Pending'),
+        ('DRAFT', 'Draft'),
+        ('SUBMITTED', 'Submitted'),
+        ('PENDING', 'Pending Review'),
+        ('IN_REVIEW', 'In Review'),
         ('APPROVED', 'Approved'),
         ('REJECTED', 'Rejected'),
+        ('RETURNED', 'Returned'),
     ]
 
     # Expense categories are real expense categories only (NO 'ALL').
@@ -56,7 +60,7 @@ class Expense(models.Model):
     status = models.CharField(
         max_length=10,
         choices=STATUS_CHOICES,
-        default='APPROVED'
+        default='PENDING'
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -65,6 +65,18 @@ EXPENSE_REVIEW_RULES = {
         'enabled': True,
         'version': '1.0',
     },
+    'MONTHLY_SPIKE': {
+        'name': 'Monthly Spending Spike',
+        'category': 'SPENDING_PATTERN',
+        'description': 'User spending this month is significantly higher than their recent monthly average.',
+        'score': 12,
+        'severity': 'MEDIUM',
+        'recommendation': 'Review total monthly spending to confirm all expenses are justified.',
+        'evidence_fields': ['current_month_total', 'monthly_average', 'spike_ratio'],
+        'threshold': 2.0,
+        'enabled': True,
+        'version': '1.0',
+    },
     'CATEGORY_OUTLIER': {
         'name': 'Statistical Category Outlier',
         'category': 'SPENDING_PATTERN',

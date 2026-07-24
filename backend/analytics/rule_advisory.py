@@ -205,7 +205,7 @@ def generate_rule_based_advice(organization, user, start_date, end_date, role):
     # Approval bottleneck: flag when pending expenses are stacking up
     pending_expenses = Expense.objects.filter(
         organization=organization,
-        status='PENDING',
+        status__in=['SUBMITTED', 'PENDING', 'IN_REVIEW'],
     )
     if str(role or '').upper() != 'OWNER':
         pending_expenses = pending_expenses.filter(user=user)

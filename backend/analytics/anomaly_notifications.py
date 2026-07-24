@@ -35,7 +35,7 @@ def notify_owners_if_expense_is_unusual(expense):
         today = timezone.localdate()
         base_queryset = Expense.objects.filter(
             organization=expense.organization,
-            status__in={'APPROVED', 'PENDING'},
+            status__in={'APPROVED', 'SUBMITTED', 'PENDING', 'IN_REVIEW'},
             date__gte=today - timedelta(days=180),
             date__lte=today,
         ).select_related('user', 'organization')

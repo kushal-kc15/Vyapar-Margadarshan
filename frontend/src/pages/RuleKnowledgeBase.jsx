@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { BookOpen, Filter, Shield } from "lucide-react";
+import { BookOpen, Filter, Shield, ToggleLeft, ToggleRight } from "lucide-react";
 
 import api from "../lib/api.js";
+import { useAuth } from "../context/AuthContext.jsx";
 import { PageHeader } from "../components/PageHeader.jsx";
 import { Panel, PanelTitle } from "../components/Panel.jsx";
 import { Spinner } from "../components/Feedback.jsx";
@@ -23,12 +24,25 @@ const CATEGORY_ICONS = {
 };
 
 export default function RuleKnowledgeBase() {
+  const { role } = useAuth();
+  const isOwner = String(role ?? "").toUpperCase() === "OWNER";
   const [rules, setRules] = useState([]);
   const [categories, setCategories] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [severityFilter, setSeverityFilter] = useState("");
+
+  const toggleRule = async (code, currentEnabled) => {
+    try {
+      await api.patch(`/analytics/rules/${code}/`, { enabled: !currentEnabled });
+      setRules((prev) =>
+        prev.map((r) => (r.code === code ? { ...r, enabled: !currentEnabled } : r))
+      );
+    } catch {
+      // silent — rule list still shows stale state until refresh
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -128,7 +142,7 @@ export default function RuleKnowledgeBase() {
             <ul className="divide-y divide-rule">
               {filtered.map((rule) => (
                 <li key={rule.code} className="py-3 first:pt-0 last:pb-0">
-                  <RuleRow rule={rule} categories={categories} />
+                  <RuleRow rule={rule} categories={categories} isOwner={isOwner} onToggle={toggleRule} />
                 </li>
               ))}
             </ul>
@@ -171,15 +185,29 @@ function StatCard({ label, value }) {
   );
 }
 
-function RuleRow({ rule, categories }) {
+function RuleRow({ rule, categories, isOwner, onToggle }) {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div>
+    <div className={!rule.enabled ? "opacity-60" : ""}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="text-sm font-semibold text-ink">{rule.name}</p>
-            {!rule.enabled && (
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => onToggle(rule.code, rule.enabled)}
+                className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] font-medium transition-colors hover:bg-paper-deep"
+                title={rule.enabled ? "Disable this rule" : "Enable this rule"}
+              >
+                {rule.enabled ? (
+                  <><ToggleRight size={14} className="text-forest-600" /> Enabled</>
+                ) : (
+                  <><ToggleLeft size={14} className="text-ink-muted" /> Disabled</>
+                )}
+              </button>
+            )}
+            {!isOwner && !rule.enabled && (
               <span className="rounded-sm bg-paper-deep px-1.5 py-0.5 text-[11px] text-ink-muted">Disabled</span>
             )}
           </div>

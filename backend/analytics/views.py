@@ -1029,30 +1029,123 @@ def anomalies(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def rules(request):
+    from .models import BusinessRule
+
     category_filter = request.query_params.get('category')
     severity_filter = request.query_params.get('severity')
 
-    rule_list = []
-    for code, rule in EXPENSE_REVIEW_RULES.items():
-        if category_filter and rule['category'] != category_filter.upper():
-            continue
-        if severity_filter and rule['severity'] != severity_filter.upper():
-            continue
-        rule_list.append({
-            'code': code,
-            'name': rule['name'],
-            'category': rule['category'],
-            'category_label': RULE_CATEGORIES.get(rule['category'], rule['category']),
-            'description': rule['description'],
-            'score': rule['score'],
-            'severity': rule['severity'],
-            'recommendation': rule['recommendation'],
-            'enabled': rule.get('enabled', True),
-            'version': rule.get('version', '1.0'),
-        })
+    # Prefer DB-managed rules; fall back to static knowledge base
+    db_rules = BusinessRule.objects.all()
+    if db_rules.exists():
+        queryset = db_rules
+        if category_filter:
+            queryset = queryset.filter(category=category_filter.upper())
+        if severity_filter:
+            queryset = queryset.filter(severity=severity_filter.upper())
+        rule_list = [
+            {
+                'code': r.code,
+                'name': r.name,
+                'category': r.category,
+                'category_label': RULE_CATEGORIES.get(r.category, r.category),
+                'description': r.description,
+                'score': r.score,
+                'severity': r.severity,
+                'recommendation': r.recommendation,
+                'enabled': r.enabled,
+                'version': r.version,
+            }
+            for r in queryset
+        ]
+    else:
+        rule_list = []
+        for code, rule in EXPENSE_REVIEW_RULES.items():
+            if category_filter and rule['category'] != category_filter.upper():
+                continue
+            if severity_filter and rule['severity'] != severity_filter.upper():
+                continue
+            rule_list.append({
+                'code': code,
+                'name': rule['name'],
+                'category': rule['category'],
+                'category_label': RULE_CATEGORIES.get(rule['category'], rule['category']),
+                'description': rule['description'],
+                'score': rule['score'],
+                'severity': rule['severity'],
+                'recommendation': rule['recommendation'],
+                'enabled': rule.get('enabled', True),
+                'version': rule.get('version', '1.0'),
+            })
 
     return Response({
         'total': len(rule_list),
         'categories': RULE_CATEGORIES,
         'rules': rule_list,
+    })
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def rule_update(request, code):
+    from .models import BusinessRule
+    from organizations.context import get_active_membership
+
+    member = get_active_membership(request.user, request)
+    if not member or member.role != 'OWNER':
+        return Response({'error': 'Only owners can update rules.'}, status=403)
+
+    try:
+        rule = BusinessRule.objects.get(code=code)
+    except BusinessRule.DoesNotExist:
+        return Response({'error': 'Rule not found.'}, status=404)
+
+    if 'enabled' in request.data:
+        rule.enabled = bool(request.data['enabled'])
+    if 'score' in request.data:
+        score_val = int(request.data['score'])
+        if 1 <= score_val <= 50:
+            rule.score = score_val
+    if 'severity' in request.data:
+        if request.data['severity'] in ('LOW', 'MEDIUM', 'HIGH'):
+            rule.severity = request.data['severity']
+    rule.save()
+
+    return Response({
+        'code': rule.code,
+        'name': rule.name,
+        'enabled': rule.enabled,
+        'score': rule.score,
+        'severity': rule.severity,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def routing_preview(request, expense_id):
+    """Preview the approval routing decision for a specific expense."""
+    from .approval_routing import route_expense
+
+    member = get_member_or_error(request)
+    if member.role != 'OWNER':
+        return Response({'error': 'Only owners can view routing decisions.'}, status=403)
+
+    try:
+        expense = Expense.objects.get(pk=expense_id, organization=member.organization)
+    except Expense.DoesNotExist:
+        return Response({'error': 'Expense not found.'}, status=404)
+
+    routing = route_expense(expense, member.organization)
+    return Response({
+        'expense_id': expense.id,
+        'expense_title': expense.title,
+        'decision': routing['decision'],
+        'risk_score': routing['risk_score'],
+        'risk_level': routing['risk_level'],
+        'rule_count': routing['rule_count'],
+        'rationale': routing['rationale'],
+        'review_suggestion': routing['review_suggestion'],
+        'triggered_rules': [
+            {'code': r['code'], 'name': r['name'], 'score': r['score'], 'severity': r['severity']}
+            for r in routing['triggered_rules']
+        ],
     })

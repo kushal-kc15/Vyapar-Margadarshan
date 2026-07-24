@@ -66,7 +66,7 @@ def admin_dashboard_data():
             },
             {
                 'label': 'Pending Expenses',
-                'value': Expense.objects.filter(status='PENDING').count(),
+                'value': Expense.objects.filter(status__in=['SUBMITTED', 'PENDING', 'IN_REVIEW']).count(),
                 'icon': 'fas fa-hourglass-half',
                 'url': admin_changelist_url(Expense),
             },
