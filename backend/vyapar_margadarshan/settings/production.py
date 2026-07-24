@@ -5,6 +5,12 @@ from django.core.exceptions import ImproperlyConfigured
 
 from .base import *
 
+# Brevo transactional email via django-anymail HTTP API
+EMAIL_BACKEND = 'anymail.backends.brevo.EmailBackend'
+
+if not ANYMAIL.get('BREVO_API_KEY'):
+    raise ImproperlyConfigured('Set BREVO_API_KEY in production for transactional email.')
+
 DEBUG = False
 
 if (
