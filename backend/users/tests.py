@@ -383,3 +383,59 @@ class TwoFactorAuthenticationTestCase(TestCase):
         self.assertNotIn('access', response.data)
         self.assertNotIn('refresh', response.data)
         self.assertEqual(len(sent_otps), 1)
+
+
+class GetClientIPTestCase(TestCase):
+    """Regression tests for get_client_ip — must always return a single string."""
+
+    def _make_request(self, **meta):
+        from django.test import RequestFactory
+        rf = RequestFactory()
+        request = rf.get('/')
+        request.META.update(meta)
+        return request
+
+    def test_cloudflare_header(self):
+        from users.utils import get_client_ip
+        request = self._make_request(HTTP_CF_CONNECTING_IP='203.0.113.50')
+        ip = get_client_ip(request)
+        self.assertEqual(ip, '203.0.113.50')
+        self.assertIsInstance(ip, str)
+
+    def test_x_forwarded_for_single(self):
+        from users.utils import get_client_ip
+        request = self._make_request(HTTP_X_FORWARDED_FOR='198.51.100.1')
+        ip = get_client_ip(request)
+        self.assertEqual(ip, '198.51.100.1')
+
+    def test_x_forwarded_for_multiple(self):
+        from users.utils import get_client_ip
+        request = self._make_request(HTTP_X_FORWARDED_FOR='198.51.100.1, 10.0.0.1, 172.16.0.1')
+        ip = get_client_ip(request)
+        self.assertEqual(ip, '198.51.100.1')
+        self.assertNotIn(',', ip)
+
+    def test_remote_addr_fallback(self):
+        from users.utils import get_client_ip
+        request = self._make_request(REMOTE_ADDR='127.0.0.1')
+        ip = get_client_ip(request)
+        self.assertEqual(ip, '127.0.0.1')
+
+    def test_cf_takes_priority_over_forwarded_for(self):
+        from users.utils import get_client_ip
+        request = self._make_request(
+            HTTP_CF_CONNECTING_IP='203.0.113.50',
+            HTTP_X_FORWARDED_FOR='198.51.100.1, 10.0.0.1',
+        )
+        ip = get_client_ip(request)
+        self.assertEqual(ip, '203.0.113.50')
+
+    def test_no_headers_returns_none(self):
+        from users.utils import get_client_ip
+        from django.test import RequestFactory
+        rf = RequestFactory()
+        request = rf.get('/')
+        # Remove REMOTE_ADDR so there are truly no IP headers
+        request.META.pop('REMOTE_ADDR', None)
+        ip = get_client_ip(request)
+        self.assertIsNone(ip)

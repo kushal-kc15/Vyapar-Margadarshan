@@ -32,6 +32,7 @@ from .auth_utils import (
 )
 from .serializers import RegisterSerializer, UserSerializer
 from .security_views import send_two_factor_challenge
+from .utils import get_client_ip
 from .throttles import (
     AuthenticatedSecurityRateThrottle,
     GoogleLoginRateThrottle,
@@ -44,15 +45,6 @@ logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
-
-def get_client_ip(request):
-    """Get client IP address from request"""
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        ip = x_forwarded_for.split(',')
-    else:
-        ip = request.META.get('REMOTE_ADDR')
-    return ip
 
 
 class RegisterView(generics.CreateAPIView):

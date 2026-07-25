@@ -15,6 +15,7 @@ from .auth_utils import (
     send_password_reset_email, send_2fa_otp_email, check_password_strength,
     blacklist_user_refresh_tokens, issue_refresh_token, hash_token
 )
+from .utils import get_client_ip
 from .throttles import (
     AuthenticatedSecurityRateThrottle,
     OTPSendRateThrottle,
@@ -30,15 +31,6 @@ User = get_user_model()
 
 EMAIL_VERIFICATION_MAX_AGE = timedelta(hours=24)
 
-
-def get_client_ip(request):
-    """Get client IP address from request"""
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        ip = x_forwarded_for.split(',')[0]
-    else:
-        ip = request.META.get('REMOTE_ADDR')
-    return ip
 
 
 def send_two_factor_challenge(user, request):
